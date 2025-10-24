@@ -1,0 +1,114 @@
+use crate::models::Note;
+
+pub mod file;
+pub mod memory;
+
+pub type RepoResult<T> = Result<T, Box<dyn core::error::Error>>;
+
+pub trait NotesRepository {
+    fn list_notes(&self) -> RepoResult<Vec<Note>>;
+    fn get_note(&self, id: &str) -> RepoResult<Option<Note>>;
+    fn save_note(&mut self, note: &Note) -> RepoResult<()>;
+    fn delete_note(&mut self, id: &str) -> RepoResult<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        cell::RefCell,
+        collections::BTreeMap,
+        sync::{Arc, Mutex},
+    };
+
+    use super::*;
+    use crate::{
+        formats::markdown::MarkdownFormat,
+        models::{Block, Inline, Note},
+        repo::{
+            file::{FileNotesRepository, FileProvider},
+            memory::MemoryNotesRepository,
+        },
+    };
+
+    pub struct MockFileProvider {
+        files: BTreeMap<String, Vec<u8>>,
+    }
+
+    unsafe impl Send for MockFileProvider {}
+    unsafe impl Sync for MockFileProvider {}
+
+    impl MockFileProvider {
+        pub fn new() -> Self {
+            Self {
+                files: BTreeMap::new(),
+            }
+        }
+    }
+
+    impl FileProvider for MockFileProvider {
+        fn read(&self, id: &str) -> Option<Vec<u8>> {
+            self.files.get(id).cloned()
+        }
+
+        fn write(&mut self, id: &str, data: &[u8]) -> bool {
+            self.files.insert(id.to_string(), data.to_vec());
+            true
+        }
+
+        fn delete(&mut self, id: &str) -> bool {
+            self.files.remove(id).is_some()
+        }
+
+        fn list(&self) -> Vec<String> {
+            self.files.keys().cloned().collect()
+        }
+    }
+
+    #[test]
+    fn memory_repo_basic_operations() {
+        let format = Arc::new(MarkdownFormat);
+        let mut repo = MemoryNotesRepository::new(format);
+
+        let note = Note {
+            id: "1".to_string(),
+            title: "Hello".to_string(),
+            blocks: vec![Block::Paragraph(vec![Inline::Text("World".to_string())])],
+        };
+
+        repo.save_note(&note).unwrap();
+
+        let loaded = repo.get_note("1").unwrap().unwrap();
+        assert_eq!(loaded.title, "Hello");
+
+        let notes = repo.list_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+
+        repo.delete_note("1").unwrap();
+        assert!(repo.get_note("1").unwrap().is_none());
+    }
+
+    #[test]
+    fn file_repo_basic_operations() {
+        let provider = Arc::new(RefCell::new(MockFileProvider::new()));
+        let format = Arc::new(MarkdownFormat);
+        let mut repo = FileNotesRepository::new(provider, format);
+
+        let note = Note {
+            id: "note1".to_string(),
+            title: "File Note".to_string(),
+            blocks: vec![Block::Paragraph(vec![Inline::Text("Content".to_string())])],
+        };
+
+        repo.save_note(&note).unwrap();
+
+        let loaded = repo.get_note("note1").unwrap().unwrap();
+        assert_eq!(loaded.title, "File Note");
+
+        let notes = repo.list_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, "note1");
+
+        repo.delete_note("note1").unwrap();
+        assert!(repo.get_note("note1").unwrap().is_none());
+    }
+}
