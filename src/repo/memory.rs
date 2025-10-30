@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-    formats::NoteFormat,
+    formats::NoteSerialization,
     models::Note,
     repo::{NotesRepository, RepoResult},
 };
@@ -10,11 +10,11 @@ use crate::{
 /// In-memory repository for notes
 pub struct MemoryNotesRepository {
     notes: RefCell<BTreeMap<String, Note>>,
-    format: Arc<dyn NoteFormat>,
+    format: Arc<dyn NoteSerialization>,
 }
 
 impl MemoryNotesRepository {
-    pub fn new(format: Arc<dyn NoteFormat>) -> Self {
+    pub fn new(format: Arc<dyn NoteSerialization>) -> Self {
         Self {
             notes: RefCell::new(BTreeMap::new()),
             format,
@@ -81,17 +81,19 @@ mod tests {
         let note = repo.get_note(&note_id).unwrap().unwrap();
         assert_eq!(note.title, "My Title");
 
-        assert!(matches!(note.blocks[0], Block::Paragraph(_)));
+        assert!(note.blocks[0].is_paragraph());
 
         let note2 = Note {
             id: "manual".to_string(),
             title: "Manual Note".to_string(),
-            blocks: vec![Block::Paragraph(vec![Inline::Text("Hello".to_string())])],
+            blocks: vec![Block::paragraph(vec![Inline::Text {
+                text: "Hello".to_string(),
+            }])],
         };
         repo.save_note(&note2).unwrap();
 
-        let notes = repo.list_notes().unwrap();
-        assert_eq!(notes.len(), 2);
+        let list_of_notes = repo.list_notes().unwrap();
+        assert_eq!(list_of_notes.len(), 2);
 
         repo.delete_note(&note_id).unwrap();
         assert!(repo.get_note(&note_id).unwrap().is_none());

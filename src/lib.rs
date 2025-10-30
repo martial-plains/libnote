@@ -1,3 +1,5 @@
+#![warn(clippy::nursery, clippy::pedantic)]
+
 pub mod formats;
 pub mod managers;
 pub mod models;

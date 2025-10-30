@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     collections::HashSet,
     fs,
     io::{BufWriter, Write},
@@ -88,10 +87,10 @@ impl FileProvider for LocalFileProvider {
 }
 
 fn main() {
-    let file_provider = Arc::new(RefCell::new(LocalFileProvider::new("examples/my_vault")));
+    let file_provider = Box::new(LocalFileProvider::new("examples/my_vault"));
     let markdown_format = Arc::new(MarkdownFormat);
 
-    let mut markdown_repo = FileNotesRepository::new(file_provider.clone(), markdown_format);
+    let mut markdown_repo = FileNotesRepository::new(file_provider, markdown_format);
     let mut writer = BufWriter::new(std::io::stdout());
 
     let vault = Vault::new(&mut markdown_repo);

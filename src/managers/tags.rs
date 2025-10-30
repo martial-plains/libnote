@@ -14,6 +14,7 @@ impl Default for GlobalTagManager {
 }
 
 impl GlobalTagManager {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             global_tags: HashMap::new(),
@@ -27,6 +28,7 @@ impl GlobalTagManager {
             .push(tag);
     }
 
+    #[must_use]
     pub fn get_tags_for(&self, note_id: &str) -> Vec<String> {
         self.global_tags.get(note_id).cloned().unwrap_or_default()
     }
@@ -44,6 +46,7 @@ impl Default for ScopedTagManager {
 }
 
 impl ScopedTagManager {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tag_index: HashMap::new(),
@@ -59,6 +62,7 @@ impl ScopedTagManager {
         }
     }
 
+    #[must_use]
     pub fn notes_with_tag(&self, tag: &str) -> Vec<String> {
         self.tag_index
             .get(tag)

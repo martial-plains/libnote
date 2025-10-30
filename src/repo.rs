@@ -14,11 +14,7 @@ pub trait NotesRepository {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::RefCell,
-        collections::BTreeMap,
-        sync::{Arc, Mutex},
-    };
+    use std::{collections::BTreeMap, sync::Arc};
 
     use super::*;
     use crate::{
@@ -72,7 +68,9 @@ mod tests {
         let note = Note {
             id: "1".to_string(),
             title: "Hello".to_string(),
-            blocks: vec![Block::Paragraph(vec![Inline::Text("World".to_string())])],
+            blocks: vec![Block::paragraph(vec![Inline::Text {
+                text: "World".to_string(),
+            }])],
         };
 
         repo.save_note(&note).unwrap();
@@ -89,14 +87,16 @@ mod tests {
 
     #[test]
     fn file_repo_basic_operations() {
-        let provider = Arc::new(RefCell::new(MockFileProvider::new()));
+        let provider = Box::new(MockFileProvider::new());
         let format = Arc::new(MarkdownFormat);
         let mut repo = FileNotesRepository::new(provider, format);
 
         let note = Note {
             id: "note1".to_string(),
             title: "File Note".to_string(),
-            blocks: vec![Block::Paragraph(vec![Inline::Text("Content".to_string())])],
+            blocks: vec![Block::paragraph(vec![Inline::Text {
+                text: "Content".to_string(),
+            }])],
         };
 
         repo.save_note(&note).unwrap();

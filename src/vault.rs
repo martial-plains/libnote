@@ -24,16 +24,19 @@ impl<'a> Vault<'a> {
         }
     }
 
+    #[must_use]
     pub fn backlinks_for_note(&self, note_id: &str) -> Vec<String> {
         self.backlinks
             .backlinks_for(&LinkTarget::Note(note_id.to_string()))
     }
 
+    #[must_use]
     pub fn backlinks_for_attachment(&self, attachment_id: &str) -> Vec<String> {
         self.backlinks
             .backlinks_for(&LinkTarget::Attachment(attachment_id.to_string()))
     }
 
+    #[must_use]
     pub fn all_tags_for(&self, note: &Note) -> Vec<String> {
         let mut tags = Vec::new();
         if let Some(tagged) = self.scoped_tags.tag_index.get(&note.id) {

@@ -1,18 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    formats::NoteFormat,
+    formats::NoteMetadata,
     models::{Attachment, LinkTarget, Note},
 };
 
 /// Manages a mapping of note → backlinks (who links to this note)
 #[derive(Default)]
 pub struct BacklinkManager {
-    /// note_id -> set of note_ids that link to it
+    /// `note_id` -> set of `note_ids` that link to it
     backlinks: HashMap<LinkTarget, HashSet<String>>,
 }
 
 impl BacklinkManager {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             backlinks: HashMap::new(),
@@ -24,11 +25,11 @@ impl BacklinkManager {
         &mut self,
         notes: &[Note],
         attachments: &[Attachment],
-        format: &dyn NoteFormat,
+        metadata: &dyn NoteMetadata,
     ) {
         self.backlinks.clear();
         for note in notes {
-            let targets = format.extract_links(note, attachments);
+            let targets = metadata.extract_links(note, attachments);
             for target in targets {
                 self.backlinks
                     .entry(target)
@@ -39,6 +40,7 @@ impl BacklinkManager {
     }
 
     /// Returns all note IDs that link to the given note ID
+    #[must_use]
     pub fn backlinks_for(&self, target: &LinkTarget) -> Vec<String> {
         self.backlinks
             .get(target)
@@ -51,42 +53,45 @@ impl BacklinkManager {
         &self,
         note: &Note,
         attachments: &[Attachment],
-        format: &dyn NoteFormat,
+        metadata: &dyn NoteMetadata,
     ) -> Vec<LinkTarget> {
-        format.extract_links(note, attachments)
+        metadata.extract_links(note, attachments)
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::{formats::markdown::MarkdownFormat, models::AttachmentType};
+    use crate::{
+        formats::{NoteSerialization, markdown::MarkdownFormat},
+        models::AttachmentType,
+    };
 
     use super::*;
 
     fn make_markdown_notes() -> (Vec<Note>, Vec<Attachment>) {
         let att1 = Attachment {
-            id: "img1".into(),
+            src: "img1".into(),
             name: "Image 1".into(),
             kind: AttachmentType::Image,
         };
         let att2 = Attachment {
-            id: "img2".into(),
+            src: "img2".into(),
             name: "Image 2".into(),
             kind: AttachmentType::Image,
         };
 
-        let note_a_md = r#"
+        let note_a_md = r"
 # Note A
 
 This links to [Note B](b) and to an attachment ![Image](img1)
-"#;
+";
 
-        let note_b_md = r#"
+        let note_b_md = r"
 # Note B
 
 This links to [Note C](c)
-"#;
+";
 
         let format = MarkdownFormat;
 

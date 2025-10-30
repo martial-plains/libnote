@@ -1,8 +1,13 @@
+use std::fmt::Write;
+
 use regex::Regex;
 
 use crate::{
-    formats::NoteFormat,
-    models::{Attachment, AttachmentType, Block, Inline, LinkTarget, Note},
+    formats::{NoteMetadata, NoteSerialization},
+    models::{
+        Alignment, Attachment, AttachmentType, Block, Blocks, ContainerBlock, Inline, LeafBlock,
+        LinkTarget, ListStyle, Note, Numbering, NumberingStyle, NumberingType,
+    },
 };
 
 #[derive(Debug)]
@@ -10,6 +15,7 @@ pub struct MarkdownFormat;
 
 impl MarkdownFormat {
     /// Parse a note from its file name and raw content
+    #[must_use]
     pub fn parse_note(&self, file_name: &str, content: &str) -> Note {
         let yaml_title = Self::extract_yaml_title(content);
         let title = yaml_title.unwrap_or_else(|| Self::strip_extension(file_name));
@@ -47,19 +53,181 @@ impl MarkdownFormat {
     }
 
     fn filename_stem(path: &str) -> String {
-        let name_part = path
-            .rsplit_once(['/', '\\'])
-            .map(|(_, name)| name)
-            .unwrap_or(path);
+        let name_part = path.rsplit_once(['/', '\\']).map_or(path, |(_, name)| name);
 
         match name_part.rsplit_once('.') {
             Some((stem, _ext)) => stem.to_string(),
             None => name_part.to_string(),
         }
     }
+
+    fn serialize_block(block: &Block) -> String {
+        match block {
+            Block::DefinitionList { items } => Self::serialize_definition_list(items),
+            Block::FootnoteDefinition { label, content } => {
+                Self::serialize_footnote(label, content)
+            }
+            Block::Container { container } => Self::serialize_container(container),
+            Block::Leaf { leaf } => Self::serialize_leaf(leaf),
+        }
+    }
+
+    fn serialize_definition_list(items: &[(Vec<Inline>, Vec<Block>)]) -> String {
+        let mut out = String::new();
+        for (term, defs) in items {
+            out.push_str(&serialize_inlines(term));
+            out.push_str(":\n");
+            for def_block in defs {
+                for line in serialize_blocks(std::slice::from_ref(def_block)).lines() {
+                    out.push_str("  ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+        out
+    }
+
+    fn serialize_footnote(label: &str, content: &[Block]) -> String {
+        let mut out = String::new();
+        write!(&mut out, "[^{label}]: ").unwrap();
+        let content_str = serialize_blocks(content);
+        out.push_str(&content_str.replace('\n', "\n    "));
+        out.push('\n');
+        out
+    }
+
+    fn serialize_container(container: &ContainerBlock) -> String {
+        match container {
+            ContainerBlock::List { style, items } => Self::serialize_list(style, items),
+            ContainerBlock::Table { headers, rows, .. } => Self::serialize_table(headers, rows),
+            ContainerBlock::Quote { blocks } => Self::serialize_quote(blocks),
+            ContainerBlock::Div { children, .. } => Self::serialize_div(children),
+        }
+    }
+
+    fn serialize_list(style: &crate::models::ListStyle, items: &[Vec<Block>]) -> String {
+        let mut out = String::new();
+
+        for (i, item_blocks) in items.iter().enumerate() {
+            let prefix = match style {
+                crate::models::ListStyle::Ordered { .. } => format!("{}. ", i + 1),
+                crate::models::ListStyle::Unordered { bullet } => format!("{bullet} "),
+            };
+
+            if let Some((first, rest)) = item_blocks.split_first() {
+                let first_serialized = serialize_blocks(core::slice::from_ref(first));
+                let mut lines = first_serialized.lines();
+                if let Some(first_line) = lines.next() {
+                    out.push_str(&prefix);
+                    out.push_str(first_line);
+                    out.push('\n');
+                }
+                for line in lines {
+                    out.push_str("  ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
+
+                for block in rest {
+                    for nested_line in serialize_blocks(core::slice::from_ref(block)).lines() {
+                        out.push_str("  ");
+                        out.push_str(nested_line);
+                        out.push('\n');
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn serialize_table(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> String {
+        let mut out = String::new();
+
+        // headers
+        for (i, header) in headers.iter().enumerate() {
+            if i > 0 {
+                out.push('|');
+            }
+            out.push(' ');
+            out.push_str(&serialize_inlines(header));
+            out.push(' ');
+        }
+        out.push('\n');
+
+        // separator
+        for i in 0..headers.len() {
+            if i > 0 {
+                out.push('|');
+            }
+            out.push_str(" --- ");
+        }
+        out.push('\n');
+
+        // rows
+        for row in rows {
+            for (i, cell) in row.iter().enumerate() {
+                if i > 0 {
+                    out.push('|');
+                }
+                out.push(' ');
+                out.push_str(&serialize_inlines(cell));
+                out.push(' ');
+            }
+            out.push('\n');
+        }
+
+        out
+    }
+
+    fn serialize_quote(blocks: &[Block]) -> String {
+        let mut out = String::new();
+        for b in blocks {
+            let lines = serialize_blocks(core::slice::from_ref(b))
+                .lines()
+                .map(|l| format!("> {l}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            out.push_str(&lines);
+            out.push('\n');
+        }
+        out
+    }
+
+    fn serialize_div(children: &[Block]) -> String {
+        children
+            .iter()
+            .map(|c| serialize_blocks(std::slice::from_ref(c)))
+            .collect()
+    }
+
+    fn serialize_leaf(leaf: &LeafBlock) -> String {
+        match leaf {
+            LeafBlock::Heading { level, content } => {
+                format!(
+                    "{} {}\n",
+                    "#".repeat(*level as usize),
+                    serialize_inlines(content)
+                )
+            }
+            LeafBlock::Paragraph { content } => format!("{}\n", serialize_inlines(content)),
+            LeafBlock::Image { alt_text, src } => {
+                format!("![{}]({})\n", alt_text.clone().unwrap_or_default(), src)
+            }
+            LeafBlock::CodeBlock { language, content } => {
+                let lang = language.as_deref().unwrap_or("");
+                format!("```{lang}\n{content}\n```\n")
+            }
+            LeafBlock::MathBlock { content } => format!("$$\n{content}\n$$\n"),
+            LeafBlock::Attachment {
+                attachment: Attachment { src, name, kind: _ },
+            } => format!("![{name}]({src})\n"),
+            LeafBlock::HorizontalRule => String::from("---\n"),
+        }
+    }
 }
 
-impl NoteFormat for MarkdownFormat {
+impl NoteSerialization for MarkdownFormat {
     fn deserialize(&self, data: &[u8], id_hint: Option<&str>) -> Note {
         let input = core::str::from_utf8(data).unwrap_or("");
 
@@ -97,9 +265,7 @@ impl NoteFormat for MarkdownFormat {
 
         let blocks = parse_blocks(&clean_body);
 
-        let id = id_hint
-            .map(Self::filename_stem)
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = id_hint.map_or_else(|| uuid::Uuid::new_v4().to_string(), Self::filename_stem);
 
         Note { id, title, blocks }
     }
@@ -111,122 +277,15 @@ impl NoteFormat for MarkdownFormat {
         output.push('\n');
 
         for block in &note.blocks {
-            match block {
-                Block::Heading(level, inlines) => {
-                    output.push_str(&"#".repeat(*level as usize));
-                    output.push(' ');
-                    output.push_str(&serialize_inlines(inlines));
-                    output.push('\n');
-                }
-                Block::Paragraph(inlines) => {
-                    output.push_str(&serialize_inlines(inlines));
-                    output.push('\n');
-                }
-                Block::List { ordered, items } => {
-                    for (i, item) in items.iter().enumerate() {
-                        let prefix = if *ordered {
-                            format!("{}. ", i + 1)
-                        } else {
-                            "- ".to_string()
-                        };
-                        if let Block::Paragraph(inlines) = item {
-                            output.push_str(&prefix);
-                            output.push_str(&serialize_inlines(inlines));
-                            output.push('\n');
-                        } else {
-                            output.push_str(&prefix);
-                            output.push_str(&serialize_blocks(core::slice::from_ref(item)));
-                        }
-                    }
-                }
-                Block::Table { headers, rows } => {
-                    for (i, header) in headers.iter().enumerate() {
-                        if i > 0 {
-                            output.push('|');
-                        }
-                        output.push(' ');
-                        output.push_str(&serialize_inlines(header));
-                        output.push(' ');
-                    }
-                    output.push('\n');
-
-                    for i in 0..headers.len() {
-                        if i > 0 {
-                            output.push('|');
-                        }
-                        output.push_str(" --- ");
-                    }
-                    output.push('\n');
-
-                    for row in rows {
-                        for (i, cell) in row.iter().enumerate() {
-                            if i > 0 {
-                                output.push('|');
-                            }
-                            output.push(' ');
-                            output.push_str(&serialize_inlines(cell));
-                            output.push(' ');
-                        }
-                        output.push('\n');
-                    }
-                }
-                Block::Image { alt_text, src } => {
-                    output.push_str("![");
-                    if let Some(alt) = alt_text {
-                        output.push_str(alt);
-                    }
-                    output.push_str("](");
-                    output.push_str(src);
-                    output.push_str(")\n");
-                }
-                Block::CodeBlock { language, content } => {
-                    output.push_str("```");
-                    if let Some(lang) = language {
-                        output.push_str(lang);
-                    }
-                    output.push('\n');
-                    output.push_str(content);
-                    output.push_str("```\n");
-                }
-                Block::MathBlock(content) => {
-                    output.push_str("$$\n");
-                    output.push_str(content);
-                    output.push_str("\n$$\n");
-                }
-                Block::Quote(inner) => {
-                    for b in inner {
-                        let lines = serialize_blocks(core::slice::from_ref(b))
-                            .lines()
-                            .map(|l| format!("> {}", l))
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        output.push_str(&lines);
-                        output.push('\n');
-                    }
-                }
-
-                Block::Attachment(Attachment {
-                    id: src,
-                    name: alt_text,
-                    kind: _,
-                }) => {
-                    output.push_str("![");
-                    output.push_str(alt_text);
-                    output.push_str("](");
-                    output.push_str(src);
-                    output.push_str(")\n");
-                }
-            }
+            output.push_str(&Self::serialize_block(block));
         }
 
         output.into_bytes()
     }
+}
 
+impl NoteMetadata for MarkdownFormat {
     fn extract_links(&self, note: &Note, attachments: &[Attachment]) -> Vec<LinkTarget> {
-        let mut links = Vec::new();
-
-        let is_attachment = |target: &str| attachments.iter().any(|a| a.id == target);
-
         fn process_inlines(
             inlines: &[Inline],
             links: &mut Vec<LinkTarget>,
@@ -246,8 +305,10 @@ impl NoteFormat for MarkdownFormat {
                             links.push(LinkTarget::Attachment(src.clone()));
                         }
                     }
-                    Inline::Bold(inner) | Inline::Italic(inner) | Inline::Strikethrough(inner) => {
-                        process_inlines(inner, links, is_attachment)
+                    Inline::Bold { content: inner }
+                    | Inline::Italic { content: inner }
+                    | Inline::Strikethrough { content: inner } => {
+                        process_inlines(inner, links, is_attachment);
                     }
                     _ => {}
                 }
@@ -261,27 +322,50 @@ impl NoteFormat for MarkdownFormat {
         ) {
             for block in blocks {
                 match block {
-                    Block::Paragraph(inlines) | Block::Heading(_, inlines) => {
-                        process_inlines(inlines, links, is_attachment)
-                    }
-                    Block::Quote(inner_blocks) => {
-                        process_blocks(inner_blocks, links, is_attachment)
-                    }
-                    Block::List { items, .. } => process_blocks(items, links, is_attachment),
-                    Block::Table { headers, rows } => {
-                        for row in headers.iter().chain(rows.iter().flatten()) {
-                            process_inlines(row, links, is_attachment);
+                    Block::Leaf { leaf: leaf_block } => match leaf_block {
+                        LeafBlock::Paragraph { content: inlines } => {
+                            process_inlines(inlines, links, is_attachment);
                         }
-                    }
-                    Block::Image { src, .. } => {
-                        if is_attachment(src) {
-                            links.push(LinkTarget::Attachment(src.clone()));
+                        LeafBlock::Heading {
+                            content: inlines, ..
+                        } => process_inlines(inlines, links, is_attachment),
+
+                        LeafBlock::Image { src, .. } => {
+                            if is_attachment(src) {
+                                links.push(LinkTarget::Attachment(src.clone()));
+                            }
                         }
-                    }
+                        _ => {}
+                    },
+
+                    Block::Container {
+                        container: container_block,
+                    } => match container_block {
+                        ContainerBlock::Quote {
+                            blocks: inner_blocks,
+                        } => process_blocks(inner_blocks, links, is_attachment),
+                        ContainerBlock::List { items, .. } => {
+                            for item in items {
+                                process_blocks(item, links, is_attachment);
+                            }
+                        }
+                        ContainerBlock::Table { headers, rows, .. } => {
+                            for row in headers.iter().chain(rows.iter().flatten()) {
+                                process_inlines(row, links, is_attachment);
+                            }
+                        }
+
+                        ContainerBlock::Div { .. } => {}
+                    },
+
                     _ => {}
                 }
             }
         }
+
+        let mut links = Vec::new();
+
+        let is_attachment = |target: &str| attachments.iter().any(|a| a.src == target);
 
         process_blocks(&note.blocks, &mut links, &is_attachment);
 
@@ -293,23 +377,74 @@ fn serialize_blocks(blocks: &[Block]) -> String {
     let mut out = String::new();
     for b in blocks {
         match b {
-            Block::Paragraph(inlines) => out.push_str(&serialize_inlines(inlines)),
-            Block::Heading(l, inlines) => {
-                out.push_str(&"#".repeat(*l as usize));
-                out.push(' ');
-                out.push_str(&serialize_inlines(inlines));
+            Block::Container { container } => match container {
+                ContainerBlock::List { .. }
+                | ContainerBlock::Quote { .. }
+                | ContainerBlock::Table { .. } => {
+                    out.push_str(
+                        &String::from_utf8(MarkdownFormat.serialize(&Note {
+                            id: String::new(),
+                            title: String::new(),
+                            blocks: vec![b.clone()],
+                        }))
+                        .unwrap_or_default(),
+                    );
+                }
+                ContainerBlock::Div { children, .. } => {
+                    for child in children {
+                        out.push_str(&serialize_blocks(std::slice::from_ref(child)));
+                    }
+                }
+            },
+            Block::Leaf { leaf } => match leaf {
+                LeafBlock::Image { .. } => {
+                    out.push_str(
+                        &String::from_utf8(MarkdownFormat.serialize(&Note {
+                            id: String::new(),
+                            title: String::new(),
+                            blocks: vec![b.clone()],
+                        }))
+                        .unwrap_or_default(),
+                    );
+                }
+                LeafBlock::Paragraph { content: inlines } => {
+                    out.push_str(&serialize_inlines(inlines));
+                }
+                LeafBlock::Heading {
+                    level,
+                    content: inlines,
+                } => {
+                    out.push_str(&"#".repeat(*level as usize));
+                    out.push(' ');
+                    out.push_str(&serialize_inlines(inlines));
+                }
+
+                LeafBlock::HorizontalRule => out.push_str("---\n"),
+
+                _ => {}
+            },
+
+            Block::DefinitionList { items } => {
+                for (term, defs) in items {
+                    out.push_str(&serialize_inlines(term));
+                    out.push_str(":\n");
+                    for def_block in defs {
+                        let def_serialized = serialize_blocks(std::slice::from_ref(def_block));
+                        for line in def_serialized.lines() {
+                            out.push_str("  ");
+                            out.push_str(line);
+                            out.push('\n');
+                        }
+                    }
+                }
             }
-            Block::List { .. } | Block::Quote(_) | Block::Table { .. } | Block::Image { .. } => {
-                out.push_str(
-                    &String::from_utf8(MarkdownFormat.serialize(&Note {
-                        id: "".to_string(),
-                        title: "".to_string(),
-                        blocks: vec![b.clone()],
-                    }))
-                    .unwrap_or_default(),
-                );
+
+            Block::FootnoteDefinition { label, content } => {
+                write!(&mut out, "[^{label}]: ").unwrap();
+                let content_str = serialize_blocks(content);
+                write!(&mut out, "{}", content_str.replace('\n', "\n    ")).unwrap();
+                writeln!(&mut out).unwrap();
             }
-            _ => {}
         }
         out.push('\n');
     }
@@ -336,21 +471,21 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
                 content.push_str(next);
                 content.push('\n');
             }
-            blocks.push(Block::CodeBlock {
-                language: if language.is_empty() {
+            blocks.push(Block::code_block(
+                if language.is_empty() {
                     None
                 } else {
                     Some(language.to_string())
                 },
                 content,
-            });
+            ));
             continue;
         }
 
         if let Some(mut content) = trimmed.strip_prefix("$$") {
             if content.ends_with("$$") {
                 content = &content[..content.len() - 2];
-                blocks.push(Block::MathBlock(content.to_string()));
+                blocks.push(Block::math_block(content.to_string()));
                 continue;
             }
 
@@ -361,25 +496,21 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
 
             for next in lines.by_ref() {
                 let next_trimmed = next.trim_end();
+                if !full_content.is_empty() {
+                    full_content.push('\n');
+                }
                 if let Some(stripped_end) = next_trimmed.strip_suffix("$$") {
-                    if !full_content.is_empty() {
-                        full_content.push('\n');
-                    }
                     full_content.push_str(stripped_end);
                     break;
-                } else {
-                    if !full_content.is_empty() {
-                        full_content.push('\n');
-                    }
-                    full_content.push_str(next_trimmed);
                 }
+                full_content.push_str(next_trimmed);
             }
 
             if full_content.ends_with('\n') {
                 full_content.pop();
             }
 
-            blocks.push(Block::MathBlock(full_content));
+            blocks.push(Block::math_block(full_content));
             continue;
         }
 
@@ -408,7 +539,7 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
             let inner = quote_lines.join("\n").trim().to_string();
 
             if !inner.is_empty() {
-                blocks.push(Block::Quote(parse_blocks(&inner)));
+                blocks.push(Block::quote(parse_blocks(&inner)));
             }
 
             continue;
@@ -454,15 +585,15 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
         if let Some((alt, src)) = parse_image(trimmed) {
             let image_line = format!("![{}]({})", alt.unwrap_or(""), src);
             if trimmed == image_line {
-                blocks.push(Block::Image {
-                    alt_text: alt.map(|s| s.to_string()),
-                    src: src.to_string(),
-                });
+                blocks.push(Block::image(
+                    alt.map(std::string::ToString::to_string),
+                    src.to_string(),
+                ));
                 continue;
             }
         }
 
-        blocks.push(Block::Paragraph(parse_inlines(trimmed)));
+        blocks.push(Block::paragraph(parse_inlines(trimmed)));
     }
 
     blocks
@@ -472,20 +603,20 @@ fn serialize_inlines(inlines: &[Inline]) -> String {
     let mut output = String::new();
     for inline in inlines {
         match inline {
-            Inline::Text(t) => output.push_str(t),
-            Inline::Bold(inner) => {
+            Inline::Text { text } => output.push_str(text),
+            Inline::Bold { content } => {
                 output.push_str("**");
-                output.push_str(&serialize_inlines(inner));
+                output.push_str(&serialize_inlines(content));
                 output.push_str("**");
             }
-            Inline::Italic(inner) => {
+            Inline::Italic { content } => {
                 output.push('*');
-                output.push_str(&serialize_inlines(inner));
+                output.push_str(&serialize_inlines(content));
                 output.push('*');
             }
-            Inline::Strikethrough(inner) => {
+            Inline::Strikethrough { content } => {
                 output.push_str("~~");
-                output.push_str(&serialize_inlines(inner));
+                output.push_str(&serialize_inlines(content));
                 output.push_str("~~");
             }
             Inline::Link { text, target } => {
@@ -504,15 +635,29 @@ fn serialize_inlines(inlines: &[Inline]) -> String {
                 output.push_str(src);
                 output.push(')');
             }
-            Inline::Code(code) => {
+            Inline::Code { code } => {
                 output.push('`');
                 output.push_str(code);
                 output.push('`');
             }
-            Inline::Math(content) => {
+            Inline::Math { content } => {
                 output.push('$');
                 output.push_str(content);
                 output.push('$');
+            }
+            Inline::LineBreak => output.push_str("  \n"),
+            Inline::Superscript { content } => {
+                output.push('^');
+                output.push_str(&serialize_inlines(content));
+            }
+            Inline::Subscript { content } => {
+                output.push('_');
+                output.push_str(&serialize_inlines(content));
+            }
+            Inline::FootnoteReference { label } => {
+                output.push_str("[^");
+                output.push_str(label);
+                output.push(']');
             }
         }
     }
@@ -524,7 +669,7 @@ fn parse_markdown_header(line: &str) -> Option<Block> {
     let mut chars = trimmed.chars().peekable();
 
     let mut level = 0;
-    while let Some('#') = chars.peek() {
+    while matches!(chars.peek(), Some('#')) {
         chars.next();
         level += 1;
     }
@@ -535,29 +680,31 @@ fn parse_markdown_header(line: &str) -> Option<Block> {
 
     let content: String = chars.collect();
 
-    Some(Block::Heading(
+    Some(Block::heading(
         level,
-        vec![Inline::Text(content.trim().to_string())],
+        vec![Inline::Text {
+            text: content.trim().to_string(),
+        }],
     ))
 }
 
+#[must_use]
 pub fn parse_list(input: &str) -> Option<Block> {
     let lines: Vec<&str> = input.lines().collect();
     if lines.is_empty() {
         return None;
     }
 
-    let mut items = Vec::new();
+    let mut items: Vec<Blocks> = Vec::new();
     let mut i = 0;
-    let mut ordered = None;
+    let mut list_style: Option<ListStyle> = None;
 
     while i < lines.len() {
-        if let Some((item_block, next_index, item_ordered)) = parse_list_item(&lines, i) {
-            if ordered.is_none() {
-                ordered = Some(item_ordered);
+        if let Some((item_blocks, next_index, style)) = parse_list_item(&lines, i) {
+            if list_style.is_none() {
+                list_style = Some(style);
             }
-
-            items.push(item_block);
+            items.push(item_blocks);
             i = next_index;
         } else {
             i += 1;
@@ -567,14 +714,14 @@ pub fn parse_list(input: &str) -> Option<Block> {
     if items.is_empty() {
         None
     } else {
-        Some(Block::List {
-            ordered: ordered.unwrap_or(false),
+        Some(Block::list(
+            list_style.unwrap_or(ListStyle::Unordered { bullet: '-' }),
             items,
-        })
+        ))
     }
 }
 
-fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Block, usize, bool)> {
+fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Blocks, usize, ListStyle)> {
     if start_index >= lines.len() {
         return None;
     }
@@ -583,17 +730,25 @@ fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Block, usize, 
     let trimmed = line.trim_start();
     let indent = line.len() - trimmed.len();
 
-    let (ordered, content) = if let Some(stripped) = trimmed.strip_prefix("- ") {
-        (false, stripped)
+    let (list_style, content) = if let Some(stripped) = trimmed.strip_prefix("- ") {
+        (ListStyle::Unordered { bullet: '-' }, stripped)
     } else if let Some(stripped) = trimmed.strip_prefix("* ") {
-        (false, stripped)
+        (ListStyle::Unordered { bullet: '*' }, stripped)
     } else if let Some(stripped) = trimmed.strip_prefix("+ ") {
-        (false, stripped)
+        (ListStyle::Unordered { bullet: '+' }, stripped)
     } else if let Some(dot_pos) = trimmed.find('.') {
         if trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
             && trimmed[dot_pos + 1..].starts_with(' ')
         {
-            (true, &trimmed[dot_pos + 2..])
+            (
+                ListStyle::Ordered {
+                    numbering: Numbering {
+                        kind: NumberingType::Decimal,
+                        style: NumberingStyle::Dot,
+                    },
+                },
+                &trimmed[dot_pos + 2..],
+            )
         } else {
             return None;
         }
@@ -601,10 +756,13 @@ fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Block, usize, 
         return None;
     };
 
-    let item_paragraph = Block::Paragraph(parse_inlines(content));
+    let mut item_blocks: Blocks = Vec::new();
+
+    item_blocks.push(Block::paragraph(parse_inlines(content.trim())));
 
     let mut nested_lines = Vec::new();
     let mut i = start_index + 1;
+
     while i < lines.len() {
         let next_line = lines[i];
         let next_trimmed = next_line.trim_start();
@@ -622,23 +780,15 @@ fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Block, usize, 
 
     if !nested_lines.is_empty() {
         let nested_input = nested_lines.join("\n");
-        if let Some(nested_list) = parse_list(&nested_input) {
-            return Some((
-                Block::List {
-                    ordered,
-                    items: vec![item_paragraph, nested_list],
-                },
-                i,
-                ordered,
-            ));
-        }
+        let nested_blocks = parse_blocks(&nested_input);
+        item_blocks.extend(nested_blocks);
     }
 
-    Some((item_paragraph, i, ordered))
+    Some((item_blocks, i, list_style))
 }
 
 fn parse_table(input: &str) -> Option<Block> {
-    let lines: Vec<_> = input.lines().filter(|l| l.contains('|')).collect();
+    let mut lines: Vec<&str> = input.lines().filter(|l| l.contains('|')).collect();
     if lines.len() < 2 {
         return None;
     }
@@ -647,6 +797,31 @@ fn parse_table(input: &str) -> Option<Block> {
         .split('|')
         .map(|c| parse_inlines(c.trim()))
         .collect::<Vec<_>>();
+
+    let alignments = if lines.len() >= 2
+        && lines[1]
+            .trim()
+            .chars()
+            .all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace())
+    {
+        let alignment_line = lines.remove(1);
+        let detected = alignment_line
+            .split('|')
+            .map(|cell| {
+                let cell = cell.trim();
+                match (cell.starts_with(':'), cell.ends_with(':')) {
+                    (true, true) => Alignment::Center,
+                    (true, false) => Alignment::Left,
+                    (false, true) => Alignment::Right,
+                    _ => Alignment::default(),
+                }
+            })
+            .collect::<Vec<_>>();
+        Some(detected)
+    } else {
+        None
+    };
+
     let rows = lines[1..]
         .iter()
         .map(|row| {
@@ -656,7 +831,9 @@ fn parse_table(input: &str) -> Option<Block> {
         })
         .collect::<Vec<_>>();
 
-    Some(Block::Table { headers, rows })
+    let caption = None;
+
+    Some(Block::table(headers, rows, alignments, caption))
 }
 
 fn parse_image(line: &str) -> Option<(Option<&str>, &str)> {
@@ -670,11 +847,12 @@ fn parse_image(line: &str) -> Option<(Option<&str>, &str)> {
     Some((if alt.is_empty() { None } else { Some(alt) }, src))
 }
 
+#[must_use]
 pub fn parse_inlines(input: &str) -> Vec<Inline> {
     let mut result = Vec::new();
     let mut chars = input.chars().peekable();
 
-    while let Some(c) = chars.peek().cloned() {
+    while let Some(c) = chars.peek().copied() {
         match c {
             '*' => {
                 chars.next();
@@ -682,11 +860,15 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                     chars.next();
                     let content = parse_until(&mut chars, "**");
                     consume_delimiter(&mut chars, "**");
-                    result.push(Inline::Bold(parse_inlines(&content)));
+                    result.push(Inline::Bold {
+                        content: parse_inlines(&content),
+                    });
                 } else {
                     let content = parse_until(&mut chars, "*");
                     consume_delimiter(&mut chars, "*");
-                    result.push(Inline::Italic(parse_inlines(&content)));
+                    result.push(Inline::Italic {
+                        content: parse_inlines(&content),
+                    });
                 }
             }
 
@@ -696,9 +878,13 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                     chars.next();
                     let content = parse_until(&mut chars, "~~");
                     consume_delimiter(&mut chars, "~~");
-                    result.push(Inline::Strikethrough(parse_inlines(&content)));
+                    result.push(Inline::Strikethrough {
+                        content: parse_inlines(&content),
+                    });
                 } else {
-                    result.push(Inline::Text("~".to_string()));
+                    result.push(Inline::Text {
+                        text: "~".to_string(),
+                    });
                 }
             }
 
@@ -706,7 +892,7 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                 chars.next();
                 let content = parse_until(&mut chars, "`");
                 consume_delimiter(&mut chars, "`");
-                result.push(Inline::Code(content));
+                result.push(Inline::Code { code: content });
             }
 
             '!' => {
@@ -733,14 +919,16 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                     }
                 }
                 chars.next();
-                result.push(Inline::Text("!".to_string()));
+                result.push(Inline::Text {
+                    text: "!".to_string(),
+                });
             }
 
             '$' => {
                 chars.next();
                 let content = parse_until(&mut chars, "$");
                 consume_delimiter(&mut chars, "$");
-                result.push(Inline::Math(content));
+                result.push(Inline::Math { content });
             }
 
             '[' => {
@@ -750,7 +938,7 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                     let text = parse_until(&mut chars, "]]");
                     consume_delimiter(&mut chars, "]]");
                     result.push(Inline::Link {
-                        text: vec![Inline::Text(text.clone())],
+                        text: vec![Inline::Text { text: text.clone() }],
                         target: text,
                     });
                 } else {
@@ -765,7 +953,9 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                             target,
                         });
                     } else {
-                        result.push(Inline::Text(format!("[{}]", text)));
+                        result.push(Inline::Text {
+                            text: format!("[{text}]"),
+                        });
                     }
                 }
             }
@@ -784,7 +974,7 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
                     }
                     text.push(chars.next().unwrap());
                 }
-                result.push(Inline::Text(text));
+                result.push(Inline::Text { text });
             }
         }
     }
@@ -801,93 +991,67 @@ where
     let delim_len = delim_chars.len();
 
     while chars.peek().is_some() {
-        if delimiter_matches(chars, &delim_chars) {
+        if delimiter_matches(chars.clone(), &delim_chars) {
             for _ in 0..delim_len {
                 chars.next();
             }
             break;
-        } else {
-            buffer.push(chars.next().unwrap());
         }
+        buffer.push(chars.next().unwrap());
     }
 
     buffer
 }
 
+#[must_use]
 pub fn extract_attachments(blocks: &[Block]) -> Vec<Attachment> {
-    let mut attachments = Vec::new();
-
     fn push_attachment(attachments: &mut Vec<Attachment>, path: &str) {
-        let name = path
-            .split(['/', '\\'])
-            .next_back()
-            .unwrap_or(path)
-            .to_string();
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
 
-        let kind = match path.rsplit('.').next().map(|s| s.to_lowercase()) {
-            Some(ext)
-                if ext == "png"
-                    || ext == "jpg"
-                    || ext == "jpeg"
-                    || ext == "gif"
-                    || ext == "bmp"
-                    || ext == "webp" =>
-            {
+        let kind = match path.rsplit('.').next().map(str::to_lowercase) {
+            Some(ext) if ["png", "jpg", "jpeg", "gif", "bmp", "webp"].contains(&ext.as_str()) => {
                 AttachmentType::Image
             }
-            Some(ext) if ext == "mp3" || ext == "wav" || ext == "ogg" || ext == "flac" => {
+            Some(ext) if ["mp3", "wav", "ogg", "flac"].contains(&ext.as_str()) => {
                 AttachmentType::Audio
             }
-            Some(ext) if ext == "mp4" || ext == "mkv" || ext == "mov" || ext == "avi" => {
+            Some(ext) if ["mp4", "mkv", "mov", "avi"].contains(&ext.as_str()) => {
                 AttachmentType::Video
             }
-            Some(ext)
-                if ext == "pdf" || ext == "doc" || ext == "docx" || ext == "txt" || ext == "md" =>
-            {
+            Some(ext) if ["pdf", "doc", "docx", "txt", "md"].contains(&ext.as_str()) => {
                 AttachmentType::Document
             }
-            Some(other) => AttachmentType::Other(other.to_string()),
-            None => AttachmentType::Other("unknown".to_string()),
+            Some(other) => AttachmentType::Other { mime: other },
+            None => AttachmentType::Other {
+                mime: "unknown".to_string(),
+            },
         };
 
         attachments.push(Attachment {
-            id: path.to_string(),
+            src: path.to_string(),
             name,
             kind,
         });
     }
 
+    let mut attachments = Vec::new();
+
     for block in blocks {
         match block {
-            Block::Image { src, .. } => push_attachment(&mut attachments, src),
+            Block::Container { container } => match container {
+                ContainerBlock::Quote { blocks: inner } => {
+                    attachments.extend(extract_attachments(inner));
+                }
 
-            Block::Paragraph(inlines) | Block::Heading(_, inlines) => {
-                for inline in inlines {
-                    match inline {
-                        Inline::Image { src, .. } => push_attachment(&mut attachments, src),
-                        Inline::Link { target, .. }
-                            if target.starts_with("![[") && target.ends_with("]]") =>
-                        {
-                            let path = &target[3..target.len() - 2];
-                            push_attachment(&mut attachments, path);
-                        }
-                        _ => {}
+                ContainerBlock::List { items, .. } => {
+                    for item_blocks in items {
+                        attachments.extend(extract_attachments(item_blocks));
                     }
                 }
-            }
 
-            Block::Quote(inner) => attachments.extend(extract_attachments(inner)),
-
-            Block::List { items, .. } => {
-                for item in items {
-                    attachments.extend(extract_attachments(core::slice::from_ref(item)));
-                }
-            }
-
-            Block::Table { rows, .. } => {
-                for row in rows {
-                    for cell in row {
-                        for inline in cell {
+                ContainerBlock::Table { rows, headers, .. } => {
+                    for cell_row in headers.iter().chain(rows.iter().flatten()) {
+                        for inline in cell_row {
                             match inline {
                                 Inline::Image { src, .. } => push_attachment(&mut attachments, src),
                                 Inline::Link { target, .. }
@@ -901,9 +1065,38 @@ pub fn extract_attachments(blocks: &[Block]) -> Vec<Attachment> {
                         }
                     }
                 }
-            }
 
-            Block::Attachment(att) => attachments.push(att.clone()),
+                ContainerBlock::Div { .. } => {}
+            },
+
+            Block::Leaf { leaf } => match leaf {
+                LeafBlock::Image { src, .. } => push_attachment(&mut attachments, src),
+                LeafBlock::Attachment { attachment } => attachments.push(attachment.clone()),
+                LeafBlock::Paragraph { content } | LeafBlock::Heading { content, .. } => {
+                    for inline in content {
+                        match inline {
+                            Inline::Image { src, .. } => push_attachment(&mut attachments, src),
+                            Inline::Link { target, .. }
+                                if target.starts_with("![[") && target.ends_with("]]") =>
+                            {
+                                let path = &target[3..target.len() - 2];
+                                push_attachment(&mut attachments, path);
+                            }
+                            Inline::Bold { content }
+                            | Inline::Italic { content }
+                            | Inline::Strikethrough { content } => {
+                                for inner in content {
+                                    if let Inline::Image { src, .. } = inner {
+                                        push_attachment(&mut attachments, src);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
 
             _ => {}
         }
@@ -912,14 +1105,13 @@ pub fn extract_attachments(blocks: &[Block]) -> Vec<Attachment> {
     attachments
 }
 
-fn delimiter_matches<I>(chars: &mut core::iter::Peekable<I>, delimiter: &[char]) -> bool
+fn delimiter_matches<I>(mut chars: core::iter::Peekable<I>, delimiter: &[char]) -> bool
 where
     I: Iterator<Item = char> + Clone,
 {
-    let mut clone = chars.clone();
     for &d in delimiter {
-        match clone.next() {
-            Some(c) if c == d => continue,
+        match chars.next() {
+            Some(c) if c == d => {}
             _ => return false,
         }
     }
@@ -948,25 +1140,45 @@ mod tests {
             id: "test-id".to_string(),
             title: "Sample Note".to_string(),
             blocks: vec![
-                Block::Heading(2, vec![Inline::Text("Heading Example".to_string())]),
-                Block::Paragraph(vec![
-                    Inline::Text("This is a ".to_string()),
-                    Inline::Bold(vec![Inline::Text("bold".to_string())]),
-                    Inline::Text(" and ".to_string()),
-                    Inline::Italic(vec![Inline::Text("italic".to_string())]),
-                    Inline::Text(" text.".to_string()),
+                Block::heading(
+                    2,
+                    vec![Inline::Text {
+                        text: "Heading Example".to_string(),
+                    }],
+                ),
+                Block::paragraph(vec![
+                    Inline::Text {
+                        text: "This is a ".to_string(),
+                    },
+                    Inline::Bold {
+                        content: vec![Inline::Text {
+                            text: "bold".to_string(),
+                        }],
+                    },
+                    Inline::Text {
+                        text: " and ".to_string(),
+                    },
+                    Inline::Italic {
+                        content: vec![Inline::Text {
+                            text: "italic".to_string(),
+                        }],
+                    },
+                    Inline::Text {
+                        text: " text.".to_string(),
+                    },
                 ]),
-                Block::Image {
-                    alt_text: Some("Alt text".to_string()),
-                    src: "image.png".to_string(),
-                },
-                Block::List {
-                    ordered: false,
-                    items: vec![
-                        Block::Paragraph(vec![Inline::Text("Item 1".to_string())]),
-                        Block::Paragraph(vec![Inline::Text("Item 2".to_string())]),
+                Block::image(Some("Alt text".to_string()), "image.png".to_string()),
+                Block::list(
+                    ListStyle::Unordered { bullet: '-' },
+                    vec![
+                        vec![Block::paragraph(vec![Inline::Text {
+                            text: "Item 1".to_string(),
+                        }])],
+                        vec![Block::paragraph(vec![Inline::Text {
+                            text: "Item 2".to_string(),
+                        }])],
                     ],
-                },
+                ),
             ],
         }
     }
@@ -984,26 +1196,23 @@ mod tests {
 
         for (input, expected_level, expected_text) in cases {
             let h = parse_markdown_header(input);
-            assert!(h.is_some(), "Failed to parse header: {:?}", input);
+            assert!(h.is_some(), "Failed to parse header: {input:?}");
 
             let block = h.unwrap();
-            if let Block::Heading(level, content) = block {
+            if let Some(LeafBlock::Heading { level, content }) = block.as_heading() {
                 assert_eq!(
                     level, expected_level,
-                    "Wrong heading level for input: {:?}",
-                    input
+                    "Wrong heading level for input: {input:?}"
                 );
                 assert_eq!(
                     content,
-                    vec![Inline::Text(expected_text.into())],
-                    "Wrong content for input: {:?}",
-                    input
+                    vec![Inline::Text {
+                        text: expected_text.into()
+                    }],
+                    "Wrong content for input: {input:?}"
                 );
             } else {
-                panic!(
-                    "Expected a Heading block for input: {:?}, got: {:?}",
-                    input, block
-                );
+                panic!("Expected a Heading block for input: {input:?}, got: {block:?}");
             }
         }
     }
@@ -1014,13 +1223,19 @@ mod tests {
         let result = parse_list(line);
         assert!(result.is_some());
 
-        if let Block::List { items, ordered } = result.unwrap() {
-            assert!(!ordered, "Expected unordered list");
+        if let Some(ContainerBlock::List { items, style }) = result.unwrap().as_list() {
+            assert!(!style.is_ordered(), "Expected unordered list");
             assert_eq!(items.len(), 1);
+            assert_eq!(items[0].len(), 1);
 
-            match &items[0] {
-                Block::Paragraph(inlines) => {
-                    assert_eq!(inlines, &vec![Inline::Text("Item 1".into())]);
+            match &items[0][0].as_paragraph() {
+                Some(LeafBlock::Paragraph { content }) => {
+                    assert_eq!(
+                        content,
+                        &vec![Inline::Text {
+                            text: "Item 1".into()
+                        }]
+                    );
                 }
                 _ => panic!("Expected Paragraph block"),
             }
@@ -1035,13 +1250,19 @@ mod tests {
         let result = parse_list(line);
         assert!(result.is_some());
 
-        if let Block::List { items, ordered } = result.unwrap() {
-            assert!(ordered, "Expected ordered list");
+        if let Some(ContainerBlock::List { items, style }) = result.unwrap().as_list() {
+            assert!(style.is_ordered(), "Expected ordered list");
             assert_eq!(items.len(), 1);
+            assert_eq!(items[0].len(), 1);
 
-            match &items[0] {
-                Block::Paragraph(inlines) => {
-                    assert_eq!(inlines, &vec![Inline::Text("First item".into())]);
+            match &items[0][0].as_paragraph() {
+                Some(LeafBlock::Paragraph { content }) => {
+                    assert_eq!(
+                        content,
+                        &vec![Inline::Text {
+                            text: "First item".into()
+                        }]
+                    );
                 }
                 _ => panic!("Expected Paragraph block"),
             }
@@ -1068,12 +1289,16 @@ Value 1  | Value 2";
         let result = parse_table(input);
         assert!(result.is_some());
 
-        if let Some(Block::Table { headers, rows }) = result {
+        if let Some(ContainerBlock::Table { headers, rows, .. }) = result.unwrap().as_table() {
             assert_eq!(
                 headers,
                 vec![
-                    vec![Inline::Text("Header 1".into())],
-                    vec![Inline::Text("Header 2".into())]
+                    vec![Inline::Text {
+                        text: "Header 1".into()
+                    }],
+                    vec![Inline::Text {
+                        text: "Header 2".into()
+                    }]
                 ]
             );
 
@@ -1081,8 +1306,12 @@ Value 1  | Value 2";
             assert_eq!(
                 rows[0],
                 vec![
-                    vec![Inline::Text("Value 1".into())],
-                    vec![Inline::Text("Value 2".into())]
+                    vec![Inline::Text {
+                        text: "Value 1".into()
+                    }],
+                    vec![Inline::Text {
+                        text: "Value 2".into()
+                    }]
                 ]
             );
         } else {
@@ -1135,8 +1364,8 @@ Value 1  | Value 2";
 
         assert_eq!(blocks.len(), 1);
 
-        match &blocks[0] {
-            Block::CodeBlock { language, content } => {
+        match &blocks[0].as_code_block() {
+            Some(LeafBlock::CodeBlock { language, content }) => {
                 assert_eq!(language.as_deref(), Some("rust"));
                 assert_eq!(content, "let x = 42;\nprintln!(\"{}\", x);\n");
             }
@@ -1151,8 +1380,8 @@ Value 1  | Value 2";
 
         assert_eq!(blocks.len(), 1);
 
-        match &blocks[0] {
-            Block::CodeBlock { language, content } => {
+        match &blocks[0].as_code_block() {
+            Some(LeafBlock::CodeBlock { language, content }) => {
                 assert!(language.is_none());
                 assert_eq!(content, "Hello world\n");
             }
@@ -1167,8 +1396,8 @@ Value 1  | Value 2";
 
         assert_eq!(blocks.len(), 1);
 
-        match &blocks[0] {
-            Block::MathBlock(content) => {
+        match &blocks[0].as_math_block() {
+            Some(LeafBlock::MathBlock { content }) => {
                 assert_eq!(content, "x^2 + y^2 = z^2");
             }
             _ => panic!("Expected a MathBlock"),
@@ -1182,8 +1411,8 @@ Value 1  | Value 2";
 
         assert_eq!(blocks.len(), 1);
 
-        match &blocks[0] {
-            Block::MathBlock(content) => {
+        match &blocks[0].as_math_block() {
+            Some(LeafBlock::MathBlock { content }) => {
                 assert_eq!(content, "x^2 + y^2 = z^2\nx + y = z");
             }
             _ => panic!("Expected a MathBlock"),
@@ -1193,7 +1422,9 @@ Value 1  | Value 2";
     #[test]
     fn test_parse_plain_text() {
         let input = "Just plain text.";
-        let expected = vec![Inline::Text("Just plain text.".into())];
+        let expected = vec![Inline::Text {
+            text: "Just plain text.".into(),
+        }];
         assert_eq!(parse_inlines(input), expected);
     }
 
@@ -1201,9 +1432,17 @@ Value 1  | Value 2";
     fn test_parse_italic() {
         let input = "This is *italic* text.";
         let expected = vec![
-            Inline::Text("This is ".into()),
-            Inline::Italic(vec![Inline::Text("italic".into())]),
-            Inline::Text(" text.".into()),
+            Inline::Text {
+                text: "This is ".into(),
+            },
+            Inline::Italic {
+                content: vec![Inline::Text {
+                    text: "italic".into(),
+                }],
+            },
+            Inline::Text {
+                text: " text.".into(),
+            },
         ];
         assert_eq!(parse_inlines(input), expected);
     }
@@ -1212,9 +1451,17 @@ Value 1  | Value 2";
     fn test_parse_bold() {
         let input = "This is **bold** text.";
         let expected = vec![
-            Inline::Text("This is ".into()),
-            Inline::Bold(vec![Inline::Text("bold".into())]),
-            Inline::Text(" text.".into()),
+            Inline::Text {
+                text: "This is ".into(),
+            },
+            Inline::Bold {
+                content: vec![Inline::Text {
+                    text: "bold".into(),
+                }],
+            },
+            Inline::Text {
+                text: " text.".into(),
+            },
         ];
         assert_eq!(parse_inlines(input), expected);
     }
@@ -1223,12 +1470,16 @@ Value 1  | Value 2";
     fn test_parse_link() {
         let input = "Check out [Rust](https://www.rust-lang.org)!";
         let expected = vec![
-            Inline::Text("Check out ".into()),
+            Inline::Text {
+                text: "Check out ".into(),
+            },
             Inline::Link {
-                text: vec![Inline::Text("Rust".into())],
+                text: vec![Inline::Text {
+                    text: "Rust".into(),
+                }],
                 target: "https://www.rust-lang.org".into(),
             },
-            Inline::Text("!".into()),
+            Inline::Text { text: "!".into() },
         ];
         assert_eq!(parse_inlines(input), expected);
     }
@@ -1236,10 +1487,18 @@ Value 1  | Value 2";
     #[test]
     fn test_parse_nested_formatting() {
         let input = "**bold and *italic inside***";
-        let expected = vec![Inline::Bold(vec![
-            Inline::Text("bold and ".into()),
-            Inline::Italic(vec![Inline::Text("italic inside".into())]),
-        ])];
+        let expected = vec![Inline::Bold {
+            content: vec![
+                Inline::Text {
+                    text: "bold and ".into(),
+                },
+                Inline::Italic {
+                    content: vec![Inline::Text {
+                        text: "italic inside".into(),
+                    }],
+                },
+            ],
+        }];
         assert_eq!(parse_inlines(input), expected);
     }
 
@@ -1247,12 +1506,26 @@ Value 1  | Value 2";
     fn test_parse_mixed_content() {
         let input = "*italic* and **bold**, then [link](url)";
         let expected = vec![
-            Inline::Italic(vec![Inline::Text("italic".into())]),
-            Inline::Text(" and ".into()),
-            Inline::Bold(vec![Inline::Text("bold".into())]),
-            Inline::Text(", then ".into()),
+            Inline::Italic {
+                content: vec![Inline::Text {
+                    text: "italic".into(),
+                }],
+            },
+            Inline::Text {
+                text: " and ".into(),
+            },
+            Inline::Bold {
+                content: vec![Inline::Text {
+                    text: "bold".into(),
+                }],
+            },
+            Inline::Text {
+                text: ", then ".into(),
+            },
             Inline::Link {
-                text: vec![Inline::Text("link".into())],
+                text: vec![Inline::Text {
+                    text: "link".into(),
+                }],
                 target: "url".into(),
             },
         ];
@@ -1264,32 +1537,49 @@ Value 1  | Value 2";
         let input = "- Item 1\n  - Nested 1\n  - Nested 2\n- Item 2";
         let result = parse_list(input).unwrap();
 
-        if let Block::List { items, ordered } = result {
-            assert!(!ordered);
+        if let Some(ContainerBlock::List { items, style }) = result.as_list() {
+            assert!(!style.is_ordered());
             assert_eq!(items.len(), 2);
 
-            match &items[0] {
-                Block::List {
-                    items: inner_items,
-                    ordered: inner_ordered,
-                } => {
-                    assert!(!inner_ordered);
-                    assert_eq!(inner_items.len(), 2);
-                    match &inner_items[0] {
-                        Block::Paragraph(inlines) => {
-                            assert_eq!(inlines, &vec![Inline::Text("Item 1".into())]);
-                        }
-                        _ => panic!("Expected paragraph"),
+            let first_item = &items[0];
+            assert!(
+                first_item[0].is_paragraph(),
+                "Expected first block in item 1 to be a paragraph"
+            );
+
+            if let Some(ContainerBlock::List {
+                items: inner_items,
+                style: inner_style,
+            }) = &first_item[1].as_list()
+            {
+                assert!(!inner_style.is_ordered());
+                assert_eq!(inner_items.len(), 2);
+                match &inner_items[0][0].as_paragraph() {
+                    Some(LeafBlock::Paragraph { content }) => {
+                        assert_eq!(
+                            content,
+                            &vec![Inline::Text {
+                                text: "Nested 1".into()
+                            }]
+                        );
                     }
+                    _ => panic!("Expected Paragraph in nested list"),
                 }
-                _ => panic!("Expected nested list"),
+            } else {
+                panic!("Expected nested list inside first item");
             }
 
-            match &items[1] {
-                Block::Paragraph(inlines) => {
-                    assert_eq!(inlines, &vec![Inline::Text("Item 2".into())]);
+            let second_item = &items[1];
+            match &second_item[0].as_paragraph() {
+                Some(LeafBlock::Paragraph { content }) => {
+                    assert_eq!(
+                        content,
+                        &vec![Inline::Text {
+                            text: "Item 2".into()
+                        }]
+                    );
                 }
-                _ => panic!("Expected paragraph"),
+                _ => panic!("Expected paragraph in second item"),
             }
         } else {
             panic!("Expected top-level list");
@@ -1300,6 +1590,8 @@ Value 1  | Value 2";
     fn test_serialization() {
         let format = MarkdownFormat;
         let note = sample_note();
+
+        dbg!(note.clone());
 
         let serialized = format.serialize(&note);
         let serialized_str = String::from_utf8(serialized).expect("Invalid UTF-8");
@@ -1316,53 +1608,68 @@ Value 1  | Value 2";
     #[test]
     fn test_deserialization() {
         let format = MarkdownFormat;
-        let markdown = r#"# Sample Note
+        let markdown = r"# Sample Note
 ## Heading Example
 This is a **bold** and *italic* text.
 ![Alt text](image.png)
 - Item 1
 - Item 2
-"#;
+";
 
         let note = format.deserialize(markdown.as_bytes(), Some("test-id"));
 
         assert_eq!(note.id, "test-id");
         assert_eq!(note.title, "Sample Note");
 
-        match &note.blocks[0] {
-            Block::Heading(level, inlines) => {
+        match &note.blocks[0].as_heading() {
+            Some(LeafBlock::Heading { level, content }) => {
                 assert_eq!(*level, 2);
-                assert_eq!(inlines, &vec![Inline::Text("Heading Example".to_string())]);
+                assert_eq!(
+                    content,
+                    &vec![Inline::Text {
+                        text: "Heading Example".to_string()
+                    }]
+                );
             }
             _ => panic!("Expected heading"),
         }
 
-        match &note.blocks[1] {
-            Block::Paragraph(inlines) => {
+        match &note.blocks[1].as_paragraph() {
+            Some(LeafBlock::Paragraph { content: inlines }) => {
                 assert_eq!(inlines.len(), 5);
                 match &inlines[1] {
-                    Inline::Bold(b) => assert_eq!(b, &vec![Inline::Text("bold".to_string())]),
+                    Inline::Bold { content: b } => assert_eq!(
+                        b,
+                        &vec![Inline::Text {
+                            text: "bold".to_string()
+                        }]
+                    ),
                     _ => panic!("Expected bold"),
                 }
                 match &inlines[3] {
-                    Inline::Italic(i) => assert_eq!(i, &vec![Inline::Text("italic".to_string())]),
+                    Inline::Italic { content: i } => assert_eq!(
+                        i,
+                        &vec![Inline::Text {
+                            text: "italic".to_string()
+                        }]
+                    ),
                     _ => panic!("Expected italic"),
                 }
             }
             _ => panic!("Expected paragraph"),
         }
 
-        match &note.blocks[2] {
-            Block::Image { alt_text, src } => {
+        match &note.blocks[2].as_image() {
+            Some(LeafBlock::Image { alt_text, src }) => {
                 assert_eq!(alt_text, &Some("Alt text".to_string()));
                 assert_eq!(src, "image.png");
             }
             _ => panic!("Expected image"),
         }
 
-        match &note.blocks[3] {
-            Block::List { ordered, items } => {
-                assert!(!ordered);
+        match &note.blocks[3].as_list() {
+            Some(ContainerBlock::List { style, items }) => {
+                assert!(!style.is_ordered());
                 assert_eq!(items.len(), 2);
             }
             _ => panic!("Expected list"),
@@ -1389,10 +1696,10 @@ This is a **bold** and *italic* text.
         let note = Note {
             id: "test-id".into(),
             title: "Code Note".into(),
-            blocks: vec![Block::CodeBlock {
-                language: Some("rust".into()),
-                content: "let x = 42;\nprintln!(\"{}\", x);\n".into(),
-            }],
+            blocks: vec![Block::code_block(
+                Some("rust".into()),
+                "let x = 42;\nprintln!(\"{}\", x);\n".into(),
+            )],
         };
 
         let serialized = format.serialize(&note);
@@ -1402,8 +1709,8 @@ This is a **bold** and *italic* text.
         assert_eq!(deserialized.title, note.title);
         assert_eq!(deserialized.blocks.len(), note.blocks.len());
 
-        match &deserialized.blocks[0] {
-            Block::CodeBlock { language, content } => {
+        match &deserialized.blocks[0].as_code_block() {
+            Some(LeafBlock::CodeBlock { language, content }) => {
                 assert_eq!(language.as_deref(), Some("rust"));
                 assert_eq!(content, "let x = 42;\nprintln!(\"{}\", x);\n");
             }
@@ -1418,7 +1725,7 @@ This is a **bold** and *italic* text.
         let note = Note {
             id: "test-id".into(),
             title: "Math Note".into(),
-            blocks: vec![Block::MathBlock("x^2 + y^2 = z^2\nx + y = z".into())],
+            blocks: vec![Block::math_block("x^2 + y^2 = z^2\nx + y = z".into())],
         };
 
         let serialized = format.serialize(&note);
@@ -1429,9 +1736,12 @@ This is a **bold** and *italic* text.
         assert_eq!(deserialized.blocks.len(), note.blocks.len());
 
         match &deserialized.blocks[0] {
-            Block::MathBlock(content) => {
-                assert_eq!(content, "x^2 + y^2 = z^2\nx + y = z");
-            }
+            Block::Leaf { leaf } => match leaf {
+                LeafBlock::MathBlock { content } => {
+                    assert_eq!(content, "x^2 + y^2 = z^2\nx + y = z");
+                }
+                _ => panic!("Expected Math leaf"),
+            },
             _ => panic!("Expected MathBlock"),
         }
     }
@@ -1442,17 +1752,27 @@ This is a **bold** and *italic* text.
         let inlines = parse_inlines(input);
 
         let expected = vec![
-            Inline::Text("This links to ".to_string()),
+            Inline::Text {
+                text: "This links to ".to_string(),
+            },
             Inline::Link {
-                text: vec![Inline::Text("Note A".to_string())],
+                text: vec![Inline::Text {
+                    text: "Note A".to_string(),
+                }],
                 target: "Note A".to_string(),
             },
-            Inline::Text(" and ".to_string()),
+            Inline::Text {
+                text: " and ".to_string(),
+            },
             Inline::Link {
-                text: vec![Inline::Text("Note B".to_string())],
+                text: vec![Inline::Text {
+                    text: "Note B".to_string(),
+                }],
                 target: "Note B".to_string(),
             },
-            Inline::Text(" in the text.".to_string()),
+            Inline::Text {
+                text: " in the text.".to_string(),
+            },
         ];
 
         assert_eq!(inlines, expected);
@@ -1465,15 +1785,23 @@ This is a **bold** and *italic* text.
         let note = Note {
             id: "1".to_string(),
             title: "Wiki Links".to_string(),
-            blocks: vec![Block::Paragraph(vec![
-                Inline::Text("Links: ".to_string()),
+            blocks: vec![Block::paragraph(vec![
+                Inline::Text {
+                    text: "Links: ".to_string(),
+                },
                 Inline::Link {
-                    text: vec![Inline::Text("Note1".to_string())],
+                    text: vec![Inline::Text {
+                        text: "Note1".to_string(),
+                    }],
                     target: "Note1".to_string(),
                 },
-                Inline::Text(", ".to_string()),
+                Inline::Text {
+                    text: ", ".to_string(),
+                },
                 Inline::Link {
-                    text: vec![Inline::Text("Note2".to_string())],
+                    text: vec![Inline::Text {
+                        text: "Note2".to_string(),
+                    }],
                     target: "Note2".to_string(),
                 },
             ])],
@@ -1490,8 +1818,8 @@ This is a **bold** and *italic* text.
 
     #[test]
     fn test_extract_single_attachment_block() {
-        let blocks = vec![Block::Attachment(Attachment {
-            id: "file1.pdf".to_string(),
+        let blocks = vec![Block::attachment(Attachment {
+            src: "file1.pdf".to_string(),
             name: "file1.pdf".to_string(),
             kind: AttachmentType::Document,
         })];
@@ -1499,7 +1827,7 @@ This is a **bold** and *italic* text.
         let attachments = extract_attachments(&blocks);
 
         assert_eq!(attachments.len(), 1);
-        assert_eq!(attachments[0].id, "file1.pdf");
+        assert_eq!(attachments[0].src, "file1.pdf");
         assert_eq!(attachments[0].name, "file1.pdf");
         assert_eq!(attachments[0].kind, AttachmentType::Document);
     }
@@ -1507,13 +1835,13 @@ This is a **bold** and *italic* text.
     #[test]
     fn test_extract_multiple_attachment_blocks() {
         let blocks = vec![
-            Block::Attachment(Attachment {
-                id: "doc1.txt".to_string(),
+            Block::attachment(Attachment {
+                src: "doc1.txt".to_string(),
                 name: "doc1.txt".to_string(),
                 kind: AttachmentType::Document,
             }),
-            Block::Attachment(Attachment {
-                id: "image.png".to_string(),
+            Block::attachment(Attachment {
+                src: "image.png".to_string(),
                 name: "image.png".to_string(),
                 kind: AttachmentType::Image,
             }),
@@ -1526,12 +1854,12 @@ This is a **bold** and *italic* text.
         assert!(
             attachments
                 .iter()
-                .any(|a| a.id == "doc1.txt" && a.name == "doc1.txt")
+                .any(|a| a.src == "doc1.txt" && a.name == "doc1.txt")
         );
         assert!(
             attachments
                 .iter()
-                .any(|a| a.id == "image.png" && a.name == "image.png")
+                .any(|a| a.src == "image.png" && a.name == "image.png")
         );
     }
 }

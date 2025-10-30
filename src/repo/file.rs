@@ -1,7 +1,7 @@
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
-    formats::{NoteFormat, markdown::extract_attachments},
+    formats::{NoteSerialization, markdown::extract_attachments},
     models::{Attachment, Note},
     repo::{NotesRepository, RepoResult},
 };
@@ -22,12 +22,12 @@ pub trait FileProvider {
 
 /// File-based repository
 pub struct FileNotesRepository {
-    provider: Arc<RefCell<dyn FileProvider>>,
-    formats: Arc<dyn NoteFormat>,
+    provider: Box<dyn FileProvider>,
+    formats: Arc<dyn NoteSerialization>,
 }
 
 impl FileNotesRepository {
-    pub fn new(provider: Arc<RefCell<dyn FileProvider>>, formats: Arc<dyn NoteFormat>) -> Self {
+    pub fn new(provider: Box<dyn FileProvider>, formats: Arc<dyn NoteSerialization>) -> Self {
         Self { provider, formats }
     }
 
@@ -44,8 +44,8 @@ impl FileNotesRepository {
 impl NotesRepository for FileNotesRepository {
     fn list_notes(&self) -> RepoResult<Vec<Note>> {
         let mut notes = Vec::new();
-        for id in self.provider.borrow().list() {
-            if let Some(bytes) = self.provider.borrow().read(&id) {
+        for id in self.provider.list() {
+            if let Some(bytes) = self.provider.read(&id) {
                 notes.push(self.formats.deserialize(&bytes, Some(&id)));
             }
         }
@@ -53,16 +53,15 @@ impl NotesRepository for FileNotesRepository {
     }
 
     fn get_note(&self, id: &str) -> RepoResult<Option<Note>> {
-        if let Some(bytes) = self.provider.borrow().read(id) {
-            Ok(Some(self.formats.deserialize(&bytes, Some(id))))
-        } else {
-            Ok(None)
-        }
+        self.provider.read(id).map_or_else(
+            || Ok(None),
+            |bytes| Ok(Some(self.formats.deserialize(&bytes, Some(id)))),
+        )
     }
 
     fn save_note(&mut self, note: &Note) -> RepoResult<()> {
         let data = self.formats.serialize(note);
-        if self.provider.borrow_mut().write(&note.id, &data) {
+        if self.provider.write(&note.id, &data) {
             Ok(())
         } else {
             Err(Box::from("Failed to write note"))
@@ -70,7 +69,7 @@ impl NotesRepository for FileNotesRepository {
     }
 
     fn delete_note(&mut self, id: &str) -> RepoResult<()> {
-        if self.provider.borrow_mut().delete(id) {
+        if self.provider.delete(id) {
             Ok(())
         } else {
             Err(Box::from("Failed to delete note"))
@@ -84,7 +83,6 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::formats::NoteFormat;
     use crate::models::{Block, Inline, Note};
 
     struct MockProvider {
@@ -120,7 +118,7 @@ mod tests {
 
     struct MockFormat;
 
-    impl NoteFormat for MockFormat {
+    impl NoteSerialization for MockFormat {
         fn serialize(&self, note: &Note) -> Vec<u8> {
             serde_cbor::to_vec(note).unwrap()
         }
@@ -136,14 +134,16 @@ mod tests {
 
     #[test]
     fn test_save_and_get_note() {
-        let provider = Arc::new(RefCell::new(MockProvider::new()));
+        let provider = Box::new(MockProvider::new());
         let format = Arc::new(MockFormat);
         let mut repo = FileNotesRepository::new(provider, format);
 
         let note = Note {
             id: "note1".to_string(),
             title: "Test Note".to_string(),
-            blocks: vec![Block::Paragraph(vec![Inline::Text("Hello World".into())])],
+            blocks: vec![Block::paragraph(vec![Inline::Text {
+                text: "Hello World".into(),
+            }])],
         };
 
         repo.save_note(&note).unwrap();
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_list_notes() {
-        let provider = Arc::new(RefCell::new(MockProvider::new()));
+        let provider = Box::new(MockProvider::new());
         let format = Arc::new(MockFormat);
         let mut repo = FileNotesRepository::new(provider, format);
 
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_delete_note() {
-        let provider = Arc::new(RefCell::new(MockProvider::new()));
+        let provider = Box::new(MockProvider::new());
         let formats = Arc::new(MockFormat);
         let mut repo = FileNotesRepository::new(provider, formats);
 
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_get_attachments() {
-        let provider = Arc::new(RefCell::new(MockProvider::new()));
+        let provider = Box::new(MockProvider::new());
         let format = Arc::new(MockFormat);
         let mut repo = FileNotesRepository::new(provider, format);
 
@@ -209,14 +209,11 @@ mod tests {
             id: "n1".to_string(),
             title: "Attachments".to_string(),
             blocks: vec![
-                Block::Paragraph(vec![Inline::Image {
+                Block::paragraph(vec![Inline::Image {
                     alt_text: Some("img1".into()),
                     src: "file1.png".into(),
                 }]),
-                Block::Image {
-                    alt_text: Some("img2".into()),
-                    src: "file2.png".into(),
-                },
+                Block::image(Some("img2".into()), "file2.png".into()),
             ],
         };
 
