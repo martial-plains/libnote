@@ -1,3 +1,5 @@
+#![allow(clippy::match_wildcard_for_single_variants)]
+
 use core::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -10,6 +12,93 @@ pub struct Note {
     pub id: String,
     pub title: String,
     pub blocks: Blocks,
+}
+
+/// A note that preserves syntax type information and supports hybrid markup
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HybridNote {
+    pub id: String,
+    pub title: String,
+    /// Blocks with syntax type and round-trip preservation
+    pub hybrid_blocks: Vec<crate::parser::HybridBlock>,
+}
+
+impl HybridNote {
+    /// Create a new hybrid note
+    #[must_use]
+    pub const fn new(id: String, title: String) -> Self {
+        Self {
+            id,
+            title,
+            hybrid_blocks: Vec::new(),
+        }
+    }
+
+    /// Add a block to the note
+    pub fn add_block(&mut self, block: crate::parser::HybridBlock) {
+        self.hybrid_blocks.push(block);
+    }
+
+    /// Get total number of blocks
+    #[must_use]
+    pub const fn block_count(&self) -> usize {
+        self.hybrid_blocks.len()
+    }
+
+    /// Find all headings in the document
+    #[must_use]
+    pub fn find_headings(&self) -> Vec<(usize, &crate::parser::HybridBlock)> {
+        self.hybrid_blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| block.is_heading())
+            .collect()
+    }
+
+    /// Find headings at a specific level
+    #[must_use]
+    pub fn find_headings_at_level(&self, level: u8) -> Vec<(usize, &crate::parser::HybridBlock)> {
+        self.hybrid_blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| block.metadata.heading_level == Some(level))
+            .collect()
+    }
+
+    /// Find all TODO/DONE items
+    #[must_use]
+    pub fn find_todos(&self) -> Vec<(usize, &crate::parser::HybridBlock)> {
+        self.hybrid_blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| block.metadata.todo_state.is_some())
+            .collect()
+    }
+
+    /// Get content at a specific index
+    #[must_use]
+    pub fn block_at(&self, index: usize) -> Option<&crate::parser::HybridBlock> {
+        self.hybrid_blocks.get(index)
+    }
+
+    /// Get mutable reference to block at index
+    pub fn block_at_mut(&mut self, index: usize) -> Option<&mut crate::parser::HybridBlock> {
+        self.hybrid_blocks.get_mut(index)
+    }
+
+    /// Remove a block at the given index
+    pub fn remove_block(&mut self, index: usize) -> Option<crate::parser::HybridBlock> {
+        if index < self.hybrid_blocks.len() {
+            Some(self.hybrid_blocks.remove(index))
+        } else {
+            None
+        }
+    }
+
+    /// Insert a block at the given index
+    pub fn insert_block(&mut self, index: usize, block: crate::parser::HybridBlock) {
+        self.hybrid_blocks.insert(index, block);
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -178,11 +267,33 @@ impl Block {
     }
 }
 
+impl Block {
+    #[must_use]
+    pub const fn as_horizontal_rule(&self) -> Option<LeafBlock> {
+        if matches!(
+            self,
+            Self::Leaf {
+                leaf: LeafBlock::HorizontalRule,
+            }
+        ) {
+            Some(LeafBlock::HorizontalRule)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn is_horizontal_rule(&self) -> bool {
+        self.as_horizontal_rule().is_some()
+    }
+}
+
 macro_rules! impl_container_helpers {
     ($($variant:ident $( { $($field:ident),* } )?),*) => {
         $(
             impl Block {
                 paste::paste! {
+                    #[must_use]
                     pub fn [<as_ $variant:snake>](&self) -> Option<ContainerBlock> {
                         if let Block::Container { container: ContainerBlock::$variant $( { $($field),* } )? } = self {
                             Some(ContainerBlock::$variant {
@@ -197,6 +308,7 @@ macro_rules! impl_container_helpers {
                         }
                     }
 
+                    #[must_use]
                     pub fn [<is_ $variant:snake>](&self) -> bool {
                         self.[<as_ $variant:snake>]().is_some()
                     }
@@ -240,7 +352,6 @@ impl_leaf_helpers!(
     Image { alt_text, src },
     CodeBlock { language, content },
     MathBlock { content },
-    HorizontalRule,
     Attachment { attachment }
 );
 
@@ -304,17 +415,17 @@ pub enum Inline {
         text: String,
     },
     Bold {
-        content: Vec<Inline>,
+        content: Vec<Self>,
     },
     Italic {
-        content: Vec<Inline>,
+        content: Vec<Self>,
     },
     Strikethrough {
-        content: Vec<Inline>,
+        content: Vec<Self>,
     },
 
     Link {
-        text: Vec<Inline>,
+        text: Vec<Self>,
         target: String,
     },
 
@@ -333,10 +444,10 @@ pub enum Inline {
     LineBreak,
 
     Superscript {
-        content: Vec<Inline>,
+        content: Vec<Self>,
     },
     Subscript {
-        content: Vec<Inline>,
+        content: Vec<Self>,
     },
 
     FootnoteReference {
@@ -392,4 +503,105 @@ pub enum DecimalStyle {
 pub enum LinkTarget {
     Note(String),
     Attachment(String),
+}
+
+/// Document format preference
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentFormat {
+    /// Pure AST representation (standard Note)
+    Abstract,
+    /// Hybrid representation preserving multiple markup syntaxes
+    Hybrid,
+}
+
+/// A document that can be either abstract or hybrid
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Document {
+    /// Standard AST-based note
+    Standard(Note),
+    /// Hybrid note with mixed markup syntaxes
+    Hybrid(HybridNote),
+}
+
+impl Document {
+    /// Create a new standard document
+    #[must_use]
+    pub const fn standard(id: String, title: String) -> Self {
+        Self::Standard(Note {
+            id,
+            title,
+            blocks: Vec::new(),
+        })
+    }
+
+    /// Create a new hybrid document
+    #[must_use]
+    pub const fn hybrid(id: String, title: String) -> Self {
+        Self::Hybrid(HybridNote {
+            id,
+            title,
+            hybrid_blocks: Vec::new(),
+        })
+    }
+
+    /// Get document ID
+    #[must_use]
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Standard(note) => &note.id,
+            Self::Hybrid(note) => &note.id,
+        }
+    }
+
+    /// Get document title
+    #[must_use]
+    pub fn title(&self) -> &str {
+        match self {
+            Self::Standard(note) => &note.title,
+            Self::Hybrid(note) => &note.title,
+        }
+    }
+
+    /// Get document format
+    #[must_use]
+    pub const fn format(&self) -> DocumentFormat {
+        match self {
+            Self::Standard(_) => DocumentFormat::Abstract,
+            Self::Hybrid(_) => DocumentFormat::Hybrid,
+        }
+    }
+
+    /// Convert to hybrid format (if not already)
+    #[must_use]
+    pub const fn as_hybrid(&self) -> Option<&HybridNote> {
+        match self {
+            Self::Hybrid(note) => Some(note),
+            _ => None,
+        }
+    }
+
+    /// Get mutable reference to hybrid format (if applicable)
+    pub const fn as_hybrid_mut(&mut self) -> Option<&mut HybridNote> {
+        match self {
+            Self::Hybrid(note) => Some(note),
+            _ => None,
+        }
+    }
+
+    /// Convert to standard format (if not already)
+    #[must_use]
+    pub const fn as_standard(&self) -> Option<&Note> {
+        match self {
+            Self::Standard(note) => Some(note),
+            _ => None,
+        }
+    }
+
+    /// Get mutable reference to standard format (if applicable)
+    pub const fn as_standard_mut(&mut self) -> Option<&mut Note> {
+        match self {
+            Self::Standard(note) => Some(note),
+            _ => None,
+        }
+    }
 }

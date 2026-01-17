@@ -21,7 +21,11 @@ impl MemoryNotesRepository {
         }
     }
 
-    /// Parse raw input (Markdown, MsgPack, etc.) and insert as a note
+    /// Parse raw input (Markdown, `MsgPack`, etc.) and insert as a note
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deserialization fails
     pub fn insert_raw(&self, raw_data: &[u8], id_hint: Option<&str>) -> RepoResult<String> {
         let note = self.format.deserialize(raw_data, id_hint);
         let id = note.id.clone();
@@ -30,6 +34,10 @@ impl MemoryNotesRepository {
     }
 
     /// Extract attachments from a stored note
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the note fails
     pub fn get_attachments(&self, note_id: &str) -> RepoResult<Vec<crate::models::Attachment>> {
         if let Some(note) = self.get_note(note_id)? {
             Ok(crate::formats::markdown::extract_attachments(&note.blocks))

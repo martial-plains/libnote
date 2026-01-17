@@ -1,3 +1,5 @@
+#![allow(clippy::missing_panics_doc, clippy::too_many_lines)]
+
 use std::fmt::Write;
 
 use regex::Regex;
@@ -471,6 +473,11 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
                 content.push_str(next);
                 content.push('\n');
             }
+
+            if content.ends_with('\n') {
+                content.pop();
+            }
+
             blocks.push(Block::code_block(
                 if language.is_empty() {
                     None
@@ -479,6 +486,7 @@ pub fn parse_blocks(input: &str) -> Vec<Block> {
                 },
                 content,
             ));
+
             continue;
         }
 
@@ -856,7 +864,7 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
         match c {
             '*' => {
                 chars.next();
-                if chars.peek() == Some(&'*') {
+                if chars.peek().is_some_and(|&c| c == '*') {
                     chars.next();
                     let content = parse_until(&mut chars, "**");
                     consume_delimiter(&mut chars, "**");
@@ -874,7 +882,7 @@ pub fn parse_inlines(input: &str) -> Vec<Inline> {
 
             '~' => {
                 chars.next();
-                if chars.peek() == Some(&'~') {
+                if chars.peek().is_some_and(|&c| c == '~') {
                     chars.next();
                     let content = parse_until(&mut chars, "~~");
                     consume_delimiter(&mut chars, "~~");
@@ -1367,7 +1375,7 @@ Value 1  | Value 2";
         match &blocks[0].as_code_block() {
             Some(LeafBlock::CodeBlock { language, content }) => {
                 assert_eq!(language.as_deref(), Some("rust"));
-                assert_eq!(content, "let x = 42;\nprintln!(\"{}\", x);\n");
+                assert_eq!(content, "let x = 42;\nprintln!(\"{}\", x);");
             }
             _ => panic!("Expected a CodeBlock"),
         }
@@ -1383,7 +1391,7 @@ Value 1  | Value 2";
         match &blocks[0].as_code_block() {
             Some(LeafBlock::CodeBlock { language, content }) => {
                 assert!(language.is_none());
-                assert_eq!(content, "Hello world\n");
+                assert_eq!(content, "Hello world");
             }
             _ => panic!("Expected a CodeBlock"),
         }

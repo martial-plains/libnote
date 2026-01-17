@@ -6,9 +6,32 @@ pub mod memory;
 pub type RepoResult<T> = Result<T, Box<dyn core::error::Error>>;
 
 pub trait NotesRepository {
+    /// List all notes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading from the repository fails
     fn list_notes(&self) -> RepoResult<Vec<Note>>;
+
+    /// Get a note by ID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading from the repository fails
     fn get_note(&self, id: &str) -> RepoResult<Option<Note>>;
+
+    /// Save a note
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the repository fails
     fn save_note(&mut self, note: &Note) -> RepoResult<()>;
+
+    /// Delete a note
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deleting from the repository fails
     fn delete_note(&mut self, id: &str) -> RepoResult<()>;
 }
 

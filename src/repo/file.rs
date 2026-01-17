@@ -32,6 +32,10 @@ impl FileNotesRepository {
     }
 
     /// Extract all attachments from a note using the format's parser.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the note from the repository fails
     pub fn get_attachments(&self, note_id: &str) -> RepoResult<Vec<Attachment>> {
         if let Some(note) = self.get_note(note_id)? {
             Ok(extract_attachments(&note.blocks))

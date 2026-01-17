@@ -1,6 +1,7 @@
 use crate::models::{Attachment, LinkTarget, Note};
 
 pub mod markdown;
+pub mod org;
 
 pub trait NoteSerialization {
     /// Deserialize bytes into a Note

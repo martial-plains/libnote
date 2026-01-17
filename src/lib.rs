@@ -1,7 +1,13 @@
-#![warn(clippy::nursery, clippy::pedantic)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
+uniffi::setup_scaffolding!();
+
+pub mod document;
+pub mod ffi;
 pub mod formats;
 pub mod managers;
 pub mod models;
+pub mod parser;
 pub mod repo;
 pub mod vault;
