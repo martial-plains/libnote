@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     formats::{NoteSerialization, markdown::extract_attachments},
@@ -6,7 +6,8 @@ use crate::{
     repo::{NotesRepository, RepoResult},
 };
 
-pub trait FileProvider {
+#[uniffi::trait_interface]
+pub trait FileProvider: Send + Sync + Debug {
     /// Read the raw bytes of a file relative to the vault
     fn read(&self, path: &str) -> Option<Vec<u8>>;
 
@@ -21,12 +22,14 @@ pub trait FileProvider {
 }
 
 /// File-based repository
+#[derive(Debug, uniffi::Object)]
 pub struct FileNotesRepository {
     provider: Box<dyn FileProvider>,
     formats: Arc<dyn NoteSerialization>,
 }
 
 impl FileNotesRepository {
+    #[uniffi::constructor]
     pub fn new(provider: Box<dyn FileProvider>, formats: Arc<dyn NoteSerialization>) -> Self {
         Self { provider, formats }
     }
@@ -89,6 +92,7 @@ mod tests {
     use super::*;
     use crate::models::{Block, Inline, Note};
 
+    #[derive(Debug)]
     struct MockProvider {
         files: HashMap<String, Vec<u8>>,
     }
@@ -120,6 +124,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
     struct MockFormat;
 
     impl NoteSerialization for MockFormat {

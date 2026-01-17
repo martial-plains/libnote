@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cell::RefCell, sync::Arc};
 
 use crate::{
     managers::{
@@ -9,17 +9,17 @@ use crate::{
     repo::NotesRepository,
 };
 
-pub struct Vault<'a> {
-    pub repo: &'a mut dyn NotesRepository,
+pub struct Vault {
+    pub repo: Box<Arc<dyn NotesRepository>>,
     scoped_tags: ScopedTagManager,
     global_tags: Arc<GlobalTagManager>,
     backlinks: BacklinkManager,
 }
 
-impl<'a> Vault<'a> {
-    pub fn new(repo: &'a mut dyn NotesRepository) -> Self {
+impl Vault {
+    pub fn new(repo: Arc<dyn NotesRepository>) -> Self {
         Self {
-            repo,
+            repo: Box::new(repo),
             scoped_tags: ScopedTagManager::new(),
             global_tags: GlobalTagManager::new(),
             backlinks: BacklinkManager::new(),

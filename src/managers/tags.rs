@@ -1,7 +1,6 @@
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use uniffi::export;
@@ -9,13 +8,10 @@ use uniffi::export;
 use crate::models::Note;
 
 /// Global tags assigned externally
-#[derive(Debug, Default, Clone, uniffi::Object)]
+#[derive(Debug, Default, uniffi::Object)]
 pub struct GlobalTagManager {
-    global_tags: RefCell<HashMap<String, Vec<String>>>,
+    global_tags: RwLock<HashMap<String, Vec<String>>>,
 }
-
-unsafe impl Send for GlobalTagManager {}
-unsafe impl Sync for GlobalTagManager {}
 
 #[export]
 impl GlobalTagManager {
@@ -23,14 +19,15 @@ impl GlobalTagManager {
     #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            global_tags: RefCell::new(HashMap::new()),
+            global_tags: RwLock::new(HashMap::new()),
         })
     }
 
     #[uniffi::method]
     pub fn assign_tag(self: Arc<Self>, note_id: &str, tag: String) {
         self.global_tags
-            .borrow_mut()
+            .write()
+            .unwrap()
             .entry(note_id.to_string())
             .or_default()
             .push(tag);
@@ -40,7 +37,8 @@ impl GlobalTagManager {
     #[uniffi::method]
     pub fn get_tags_for(self: Arc<Self>, note_id: &str) -> Vec<String> {
         self.global_tags
-            .borrow()
+            .write()
+            .unwrap()
             .get(note_id)
             .cloned()
             .unwrap_or_default()

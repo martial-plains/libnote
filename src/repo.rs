@@ -1,3 +1,7 @@
+use std::fmt::Debug;
+
+use uniffi::trait_interface;
+
 use crate::models::Note;
 
 pub mod file;
@@ -5,7 +9,8 @@ pub mod memory;
 
 pub type RepoResult<T> = Result<T, Box<dyn core::error::Error>>;
 
-pub trait NotesRepository {
+#[trait_interface]
+pub trait NotesRepository: Send + Sync + Debug {
     /// List all notes
     ///
     /// # Errors
@@ -49,12 +54,10 @@ mod tests {
         },
     };
 
+    #[derive(Debug)]
     pub struct MockFileProvider {
         files: BTreeMap<String, Vec<u8>>,
     }
-
-    unsafe impl Send for MockFileProvider {}
-    unsafe impl Sync for MockFileProvider {}
 
     impl MockFileProvider {
         pub fn new() -> Self {

@@ -1,7 +1,7 @@
 //! Parser interface and traits for extensibility
 
 use crate::models::Block;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use super::{BlockMetadata, SyntaxKind};
 
@@ -9,7 +9,7 @@ use super::{BlockMetadata, SyntaxKind};
 pub use crate::error::{ParseError, ParseResult};
 
 /// Trait for implementing parsers for different syntaxes
-pub trait Parser: Send + Sync {
+pub trait Parser: Send + Sync + Debug {
     /// Get the syntax kind this parser handles
     fn syntax_kind(&self) -> SyntaxKind;
 

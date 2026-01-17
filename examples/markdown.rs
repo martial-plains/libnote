@@ -12,12 +12,10 @@ use note::{
     vault::Vault,
 };
 
+#[derive(Debug)]
 struct LocalFileProvider {
     base_path: PathBuf,
 }
-
-unsafe impl Send for LocalFileProvider {}
-unsafe impl Sync for LocalFileProvider {}
 
 impl LocalFileProvider {
     pub fn new<P: AsRef<Path>>(base_path: P) -> Self {
@@ -90,10 +88,10 @@ fn main() {
     let file_provider = Box::new(LocalFileProvider::new("examples/my_vault"));
     let markdown_format = Arc::new(MarkdownFormat);
 
-    let mut markdown_repo = FileNotesRepository::new(file_provider, markdown_format);
+    let markdown_repo = Arc::new(FileNotesRepository::new(file_provider, markdown_format));
     let mut writer = BufWriter::new(std::io::stdout());
 
-    let vault = Vault::new(&mut markdown_repo);
+    let vault = Vault::new(markdown_repo);
 
     if let Some(note) = vault
         .repo

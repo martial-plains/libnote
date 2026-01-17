@@ -7,6 +7,7 @@ use crate::parser::{BlockMetadata, SyntaxKind};
 use super::super::interface::{ParseResult, Parser};
 
 /// Parser for LaTeX math syntax
+#[derive(Debug)]
 pub struct LaTeXParser;
 
 impl Parser for LaTeXParser {
@@ -42,10 +43,7 @@ impl LaTeXParser {
     /// Extract math content from LaTeX delimiters
     fn extract_math_content(&self, text: &str) -> String {
         if text.contains("$$") {
-            return text
-                .replace("$$", "")
-                .trim()
-                .to_string();
+            return text.replace("$$", "").trim().to_string();
         }
 
         if text.contains("\\[") {

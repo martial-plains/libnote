@@ -1,5 +1,7 @@
-use core::cell::RefCell;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, RwLock},
+};
 
 use crate::{
     formats::NoteSerialization,
@@ -8,15 +10,16 @@ use crate::{
 };
 
 /// In-memory repository for notes
+#[derive(Debug)]
 pub struct MemoryNotesRepository {
-    notes: RefCell<BTreeMap<String, Note>>,
+    notes: RwLock<BTreeMap<String, Note>>,
     format: Arc<dyn NoteSerialization>,
 }
 
 impl MemoryNotesRepository {
     pub fn new(format: Arc<dyn NoteSerialization>) -> Self {
         Self {
-            notes: RefCell::new(BTreeMap::new()),
+            notes: RwLock::new(BTreeMap::new()),
             format,
         }
     }
@@ -29,7 +32,7 @@ impl MemoryNotesRepository {
     pub fn insert_raw(&self, raw_data: &[u8], id_hint: Option<&str>) -> RepoResult<String> {
         let note = self.format.deserialize(raw_data, id_hint);
         let id = note.id.clone();
-        self.notes.borrow_mut().insert(id.clone(), note);
+        self.notes.write().unwrap().insert(id.clone(), note);
         Ok(id)
     }
 
@@ -49,22 +52,23 @@ impl MemoryNotesRepository {
 
 impl NotesRepository for MemoryNotesRepository {
     fn list_notes(&self) -> RepoResult<Vec<Note>> {
-        Ok(self.notes.borrow().values().cloned().collect())
+        Ok(self.notes.read().unwrap().values().cloned().collect())
     }
 
     fn get_note(&self, id: &str) -> RepoResult<Option<Note>> {
-        Ok(self.notes.borrow().get(id).cloned())
+        Ok(self.notes.read().unwrap().get(id).cloned())
     }
 
     fn save_note(&mut self, note: &Note) -> RepoResult<()> {
         self.notes
-            .borrow_mut()
+            .write()
+            .unwrap()
             .insert(note.id.clone(), note.clone());
         Ok(())
     }
 
     fn delete_note(&mut self, id: &str) -> RepoResult<()> {
-        self.notes.borrow_mut().remove(id);
+        self.notes.write().unwrap().remove(id);
         Ok(())
     }
 }

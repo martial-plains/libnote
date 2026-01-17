@@ -7,6 +7,7 @@ use crate::parser::{BlockMetadata, SyntaxKind};
 use super::super::interface::{ParseResult, Parser};
 
 /// Parser for Org-mode syntax
+#[derive(Debug)]
 pub struct OrgParser;
 
 impl Parser for OrgParser {
@@ -33,25 +34,28 @@ impl Parser for OrgParser {
                 metadata.todo_state = Some("DONE".to_string());
             }
 
-            let content = vec![Inline::Text {
-                text: title,
-            }];
+            let content = vec![Inline::Text { text: title }];
 
             return Ok((Block::heading(level, content), metadata));
         }
 
         if first_line.starts_with("#+BEGIN_SRC")
-            && let Some(language) = first_line.strip_prefix("#+BEGIN_SRC").map(str::trim) {
-                let code_lines = &lines[1..lines.len().saturating_sub(1)];
-                let code_content = code_lines.join("\n");
-                return Ok((
-                    Block::code_block(
-                        if language.is_empty() { None } else { Some(language.to_string()) },
-                        code_content,
-                    ),
-                    metadata,
-                ));
-            }
+            && let Some(language) = first_line.strip_prefix("#+BEGIN_SRC").map(str::trim)
+        {
+            let code_lines = &lines[1..lines.len().saturating_sub(1)];
+            let code_content = code_lines.join("\n");
+            return Ok((
+                Block::code_block(
+                    if language.is_empty() {
+                        None
+                    } else {
+                        Some(language.to_string())
+                    },
+                    code_content,
+                ),
+                metadata,
+            ));
+        }
 
         let content = vec![Inline::Text {
             text: raw_text.to_string(),
@@ -150,7 +154,9 @@ mod tests {
     #[test]
     fn parse_org_code_block() {
         let parser = OrgParser;
-        let (block, _) = parser.parse("#+BEGIN_SRC rust\nfn main() {}\n#+END_SRC", 0).unwrap();
+        let (block, _) = parser
+            .parse("#+BEGIN_SRC rust\nfn main() {}\n#+END_SRC", 0)
+            .unwrap();
 
         assert!(matches!(
             block,

@@ -7,6 +7,7 @@ use crate::parser::{BlockMetadata, SyntaxKind};
 use super::super::interface::{ParseResult, Parser};
 
 /// Parser for Markdown syntax
+#[derive(Debug)]
 pub struct MarkdownParser;
 
 impl Parser for MarkdownParser {
@@ -19,23 +20,27 @@ impl Parser for MarkdownParser {
         let lines: Vec<&str> = raw_text.lines().collect();
 
         if let Some(first_line) = lines.first()
-            && let Some(level) = self.get_heading_level(first_line) {
-                metadata.heading_level = Some(level);
+            && let Some(level) = self.get_heading_level(first_line)
+        {
+            metadata.heading_level = Some(level);
 
-                let heading_text = first_line.trim_start_matches('#').trim();
-                let content = vec![Inline::Text {
-                    text: heading_text.to_string(),
-                }];
+            let heading_text = first_line.trim_start_matches('#').trim();
+            let content = vec![Inline::Text {
+                text: heading_text.to_string(),
+            }];
 
-                return Ok((Block::heading(level, content), metadata));
-            }
+            return Ok((Block::heading(level, content), metadata));
+        }
 
         if lines.len() == 1 {
             let line = lines[0].trim();
             if (line.starts_with("---") || line.starts_with("***") || line.starts_with("___"))
-                && line.chars().all(|c| c == '-' || c == '*' || c == '_' || c.is_whitespace()) {
-                    return Ok((Block::horizontal_rule(), metadata));
-                }
+                && line
+                    .chars()
+                    .all(|c| c == '-' || c == '*' || c == '_' || c.is_whitespace())
+            {
+                return Ok((Block::horizontal_rule(), metadata));
+            }
         }
 
         let content = self.parse_inline_content(raw_text);
@@ -72,9 +77,7 @@ impl Parser for MarkdownParser {
     }
 
     fn can_handle(&self, text: &str) -> bool {
-        !text.trim().is_empty()
-            && !text.trim().starts_with("#+BEGIN_")
-            && !text.contains("$$")
+        !text.trim().is_empty() && !text.trim().starts_with("#+BEGIN_") && !text.contains("$$")
     }
 }
 
@@ -88,7 +91,10 @@ impl MarkdownParser {
         }
 
         let hash_count = trimmed.chars().take_while(|c| *c == '#').count();
-        if hash_count > 0 && hash_count < 7 && (trimmed.get(hash_count..hash_count + 1) == Some(" ")) {
+        if hash_count > 0
+            && hash_count < 7
+            && (trimmed.get(hash_count..hash_count + 1) == Some(" "))
+        {
             Some(hash_count as u8)
         } else {
             None
