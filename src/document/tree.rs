@@ -33,6 +33,7 @@ pub struct Document {
 }
 
 impl Document {
+    #[must_use]
     #[uniffi::constructor]
     pub fn new(id: String, root: Section) -> Arc<Document> {
         Arc::new(Self { id, root })

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub type Blocks = Vec<Block>;
 pub type Inlines = Vec<Inline>;
 
-/// A key-value attribute pair for UniFFI compatibility
+/// A key-value attribute pair for `UniFFI` compatibility
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Record)]
 pub struct Attribute {
     pub key: String,
