@@ -21,7 +21,7 @@ pub struct DefinitionItem {
     pub definition: Blocks,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Record)]
 pub struct Note {
     pub id: String,
     pub title: String,

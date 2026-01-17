@@ -27,7 +27,7 @@ impl SyntaxBlock {
 }
 
 /// Configuration for block detection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct DetectionConfig {
     /// Markers for Markdown fenced code blocks
     pub markdown_code_fence: String,
@@ -48,6 +48,7 @@ impl Default for DetectionConfig {
 }
 
 /// Block detector that identifies blocks by syntax markers
+#[derive(Debug)]
 pub struct BlockDetector {
     #[allow(dead_code)]
     config: DetectionConfig,

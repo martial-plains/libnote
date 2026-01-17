@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     managers::{
         backlinks::BacklinkManager,
@@ -10,7 +12,7 @@ use crate::{
 pub struct Vault<'a> {
     pub repo: &'a mut dyn NotesRepository,
     scoped_tags: ScopedTagManager,
-    global_tags: GlobalTagManager,
+    global_tags: Arc<GlobalTagManager>,
     backlinks: BacklinkManager,
 }
 
@@ -42,7 +44,7 @@ impl<'a> Vault<'a> {
         if let Some(tagged) = self.scoped_tags.tag_index.get(&note.id) {
             tags.extend(tagged.iter().cloned());
         }
-        tags.extend(self.global_tags.get_tags_for(&note.id));
+        tags.extend(self.global_tags.clone().get_tags_for(&note.id));
         tags
     }
 }

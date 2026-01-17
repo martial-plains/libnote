@@ -1,4 +1,4 @@
-#![allow(clippy::missing_panics_doc, clippy::too_many_lines)]
+#![allow(clippy::too_many_lines)]
 
 use std::fmt::Write;
 
@@ -12,26 +12,10 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
+#[derive(Debug, uniffi::Record)]
 pub struct MarkdownFormat;
 
 impl MarkdownFormat {
-    /// Parse a note from its file name and raw content
-    #[must_use]
-    pub fn parse_note(&self, file_name: &str, content: &str) -> Note {
-        let yaml_title = Self::extract_yaml_title(content);
-        let title = yaml_title.unwrap_or_else(|| Self::strip_extension(file_name));
-        let body = Self::strip_yaml_frontmatter(content);
-
-        let blocks = parse_blocks(&body);
-
-        Note {
-            id: file_name.to_string(),
-            title,
-            blocks,
-        }
-    }
-
     fn extract_yaml_title(content: &str) -> Option<String> {
         let re = Regex::new(r"(?s)^---\s*(.*?)\s*---").ok()?;
         let caps = re.captures(content)?;
@@ -225,6 +209,26 @@ impl MarkdownFormat {
                 attachment: Attachment { src, name, kind: _ },
             } => format!("![{name}]({src})\n"),
             LeafBlock::HorizontalRule => String::from("---\n"),
+        }
+    }
+}
+
+#[uniffi::export]
+impl MarkdownFormat {
+    /// Parse a note from its file name and raw content
+    #[must_use]
+    #[uniffi::method]
+    pub fn parse_note(&self, file_name: &str, content: &str) -> Note {
+        let yaml_title = Self::extract_yaml_title(content);
+        let title = yaml_title.unwrap_or_else(|| Self::strip_extension(file_name));
+        let body = Self::strip_yaml_frontmatter(content);
+
+        let blocks = parse_blocks(&body);
+
+        Note {
+            id: file_name.to_string(),
+            title,
+            blocks,
         }
     }
 }
@@ -453,6 +457,7 @@ fn serialize_blocks(blocks: &[Block]) -> String {
     out
 }
 
+#[uniffi::export]
 pub fn parse_blocks(input: &str) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut lines = input.lines().peekable();
@@ -697,6 +702,7 @@ fn parse_markdown_header(line: &str) -> Option<Block> {
 }
 
 #[must_use]
+#[uniffi::export]
 pub fn parse_list(input: &str) -> Option<Block> {
     let lines: Vec<&str> = input.lines().collect();
     if lines.is_empty() {
@@ -856,6 +862,7 @@ fn parse_image(line: &str) -> Option<(Option<&str>, &str)> {
 }
 
 #[must_use]
+#[uniffi::export]
 pub fn parse_inlines(input: &str) -> Vec<Inline> {
     let mut result = Vec::new();
     let mut chars = input.chars().peekable();
@@ -1012,6 +1019,7 @@ where
 }
 
 #[must_use]
+#[uniffi::export]
 pub fn extract_attachments(blocks: &[Block]) -> Vec<Attachment> {
     fn push_attachment(attachments: &mut Vec<Attachment>, path: &str) {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();

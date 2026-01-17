@@ -1,36 +1,49 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+use uniffi::export;
 
 use crate::models::Note;
 
 /// Global tags assigned externally
+#[derive(Debug, Default, Clone, uniffi::Object)]
 pub struct GlobalTagManager {
-    pub global_tags: HashMap<String, Vec<String>>,
+    global_tags: RefCell<HashMap<String, Vec<String>>>,
 }
 
-impl Default for GlobalTagManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+unsafe impl Send for GlobalTagManager {}
+unsafe impl Sync for GlobalTagManager {}
 
+#[export]
 impl GlobalTagManager {
     #[must_use]
-    pub fn new() -> Self {
-        Self {
-            global_tags: HashMap::new(),
-        }
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            global_tags: RefCell::new(HashMap::new()),
+        })
     }
 
-    pub fn assign_tag(&mut self, note_id: &str, tag: String) {
+    #[uniffi::method]
+    pub fn assign_tag(self: Arc<Self>, note_id: &str, tag: String) {
         self.global_tags
+            .borrow_mut()
             .entry(note_id.to_string())
             .or_default()
             .push(tag);
     }
 
     #[must_use]
-    pub fn get_tags_for(&self, note_id: &str) -> Vec<String> {
-        self.global_tags.get(note_id).cloned().unwrap_or_default()
+    #[uniffi::method]
+    pub fn get_tags_for(self: Arc<Self>, note_id: &str) -> Vec<String> {
+        self.global_tags
+            .borrow()
+            .get(note_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -99,8 +112,8 @@ mod tag_tests {
             scoped.index_note(note, |_note| vec!["scoped".into()]);
         }
 
-        let mut global = GlobalTagManager::new();
-        global.assign_tag("a", "global".into());
+        let global = GlobalTagManager::new();
+        global.clone().assign_tag("a", "global".into());
 
         assert_eq!(scoped.notes_with_tag("scoped").len(), 2);
         assert_eq!(global.get_tags_for("a"), vec!["global"]);

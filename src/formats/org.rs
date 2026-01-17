@@ -11,6 +11,7 @@ use crate::formats::{NoteMetadata, NoteSerialization};
 use crate::models::{Block, ContainerBlock, Inline, LeafBlock, LinkTarget, Note};
 
 /// Entry point for Org serialization/deserialization
+#[derive(Debug, uniffi::Object)]
 pub struct OrgFormat;
 
 impl NoteSerialization for OrgFormat {
@@ -125,7 +126,7 @@ pub mod parser {
     };
     use std::collections::HashMap;
 
-    #[must_use] 
+    #[must_use]
     pub fn parse_org(input: &str) -> OrgDocument {
         let mut root: Vec<OrgNode> = Vec::new();
         let mut stack: Vec<OrgNode> = Vec::new();
