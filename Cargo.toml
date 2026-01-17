@@ -12,5 +12,14 @@ regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_cbor = "0.11.2"
 uuid = { version = "1.19.0", features = ["v4"] }
-uniffi = "0.31.0"
+uniffi = { version = "0.31.0", features = ["cli"] }
 thiserror = "2.0.17"
+
+[build-dependencies]
+uniffi = { version = "0.31.0", features = ["build"] }
+
+[dev-dependencies]
+uniffi = { version = "0.31.0", features = ["bindgen-tests"] }
+
+[features]
+ffi-trace = ["uniffi/ffi-trace"]
