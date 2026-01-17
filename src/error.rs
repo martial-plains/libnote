@@ -5,11 +5,11 @@
 use thiserror::Error;
 
 /// Parse-related errors
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, Error, uniffi::Error)]
 pub enum ParseError {
     /// Syntax error at a specific line
     #[error("Syntax error at line {line}: {message}")]
-    SyntaxError { line: usize, message: String },
+    SyntaxError { line: u64, message: String },
 
     /// Unsupported syntax type
     #[error("Unsupported syntax: {0}")]
@@ -26,7 +26,7 @@ pub enum ParseError {
 
 impl ParseError {
     /// Create a syntax error at a specific line
-    pub fn syntax_error(line: usize, message: impl Into<String>) -> Self {
+    pub fn syntax_error(line: u64, message: impl Into<String>) -> Self {
         Self::SyntaxError {
             line,
             message: message.into(),
@@ -53,7 +53,7 @@ impl ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 /// Document-related errors
-#[derive(Debug, Error)]
+#[derive(Debug, Error, uniffi::Error)]
 pub enum DocumentError {
     /// Invalid document format
     #[error("Invalid document format: {0}")]
@@ -106,7 +106,7 @@ impl DocumentError {
 pub type DocumentResult<T> = Result<T, DocumentError>;
 
 /// Serialization-related errors
-#[derive(Debug, Error)]
+#[derive(Debug, Error, uniffi::Error)]
 pub enum SerializationError {
     /// Invalid UTF-8 encoding
     #[error("Invalid UTF-8 encoding")]
@@ -146,7 +146,7 @@ impl SerializationError {
 pub type SerializationResult<T> = Result<T, SerializationError>;
 
 /// Repository-related errors
-#[derive(Debug, Error)]
+#[derive(Debug, Error, uniffi::Error)]
 pub enum RepositoryError {
     /// Note not found
     #[error("Note not found: {0}")]
@@ -200,7 +200,7 @@ impl RepositoryError {
 pub type RepositoryResult<T> = Result<T, RepositoryError>;
 
 /// Main unified error type that can represent any libnote error
-#[derive(Debug, Error)]
+#[derive(Debug, Error, uniffi::Error)]
 pub enum LibnoteError {
     /// Parsing error
     #[error(transparent)]
