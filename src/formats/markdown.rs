@@ -114,7 +114,7 @@ impl MarkdownFormat {
         for (i, item_blocks) in items.iter().enumerate() {
             let prefix = match style {
                 crate::models::ListStyle::Ordered { .. } => format!("{}. ", i + 1),
-                crate::models::ListStyle::Unordered { bullet } => format!("{bullet} "),
+                crate::models::ListStyle::Unordered { bullet } => format!("{} ", *bullet as char),
             };
 
             if let Some((first, rest)) = item_blocks.split_first() {
@@ -1598,8 +1598,6 @@ Value 1  | Value 2";
     fn test_serialization() {
         let format = MarkdownFormat;
         let note = sample_note();
-
-        dbg!(note.clone());
 
         let serialized = format.serialize(&note);
         let serialized_str = String::from_utf8(serialized).expect("Invalid UTF-8");

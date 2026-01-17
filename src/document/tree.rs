@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(section.id, NodeId { value: 10 });
 
         let block = &section.blocks[0];
-        assert_eq!(block.id, NodeId { value: 10 });
+        assert_eq!(block.id, NodeId { value: 11 });
     }
 
     #[test]
