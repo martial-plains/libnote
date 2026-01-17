@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use super::{BlockDetector, HybridBlock, ParserRegistry};
+use crate::error::{DocumentError, DocumentResult};
 
 /// Manages a collection of hybrid blocks with efficient update tracking
 pub struct BlockManager {
@@ -15,7 +16,7 @@ pub struct BlockManager {
 
 impl BlockManager {
     /// Create a new block manager
-    #[must_use] 
+    #[must_use]
     pub fn new(detector: BlockDetector, parser_registry: ParserRegistry) -> Self {
         Self {
             blocks: Vec::new(),
@@ -30,7 +31,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// Returns an error if no suitable parser exists for a detected block's syntax
-    pub fn parse_document(&mut self, text: &str) -> Result<(), String> {
+    pub fn parse_document(&mut self, text: &str) -> DocumentResult<()> {
         let raw_blocks = self.detector.detect(text);
         self.blocks.clear();
         self.dirty_blocks.clear();
@@ -39,11 +40,9 @@ impl BlockManager {
             let parser = self
                 .parser_registry
                 .get(raw_block.syntax)
-                .ok_or_else(|| format!("No parser for {:?}", raw_block.syntax))?;
+                .ok_or_else(|| DocumentError::missing_parser(format!("{:?}", raw_block.syntax)))?;
 
-            let (ast, metadata) = parser
-                .parse(&raw_block.content, raw_block.start_line)
-                .map_err(|e| e.to_string())?;
+            let (ast, metadata) = parser.parse(&raw_block.content, raw_block.start_line)?;
 
             let hybrid_block = HybridBlock::new(
                 raw_block.syntax,
@@ -60,7 +59,7 @@ impl BlockManager {
     }
 
     /// Get all blocks
-    #[must_use] 
+    #[must_use]
     pub fn blocks(&self) -> &[HybridBlock] {
         &self.blocks
     }
@@ -78,20 +77,18 @@ impl BlockManager {
     /// # Errors
     ///
     /// Returns an error if parsing the new text fails
-    pub fn update_block_text(&mut self, index: usize, new_text: String) -> Result<(), String> {
+    pub fn update_block_text(&mut self, index: usize, new_text: String) -> DocumentResult<()> {
         let block = self
             .blocks
             .get_mut(index)
-            .ok_or("Block index out of range")?;
+            .ok_or(DocumentError::InvalidIndex)?;
 
         let parser = self
             .parser_registry
             .get(block.syntax)
-            .ok_or_else(|| format!("No parser for {:?}", block.syntax))?;
+            .ok_or_else(|| DocumentError::missing_parser(format!("{:?}", block.syntax)))?;
 
-        let (ast, metadata) = parser
-            .parse(&new_text, block.line_range.0)
-            .map_err(|e| e.to_string())?;
+        let (ast, metadata) = parser.parse(&new_text, block.line_range.0)?;
 
         block.raw_text = new_text;
         block.ast = ast;
@@ -102,7 +99,7 @@ impl BlockManager {
     }
 
     /// Get blocks that have been modified since last clear
-    #[must_use] 
+    #[must_use]
     pub fn dirty_blocks(&self) -> Vec<usize> {
         self.dirty_blocks.iter().copied().collect()
     }
@@ -140,14 +137,14 @@ impl BlockManager {
     /// # Errors
     ///
     /// Returns an error if no suitable parser exists for rendering a block's syntax
-    pub fn render_document(&self) -> Result<String, String> {
+    pub fn render_document(&self) -> DocumentResult<String> {
         let mut output = String::new();
 
         for block in &self.blocks {
             let parser = self
                 .parser_registry
                 .get(block.syntax)
-                .ok_or_else(|| format!("No parser for {:?}", block.syntax))?;
+                .ok_or_else(|| DocumentError::missing_parser(format!("{:?}", block.syntax)))?;
 
             let rendered = parser.render(&block.ast, &block.metadata);
             output.push_str(&rendered);
@@ -162,7 +159,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// Returns an error if no suitable parser exists for rendering a block's syntax
-    pub fn render_dirty_blocks(&self) -> Result<String, String> {
+    pub fn render_dirty_blocks(&self) -> DocumentResult<String> {
         let mut output = String::new();
 
         for index in self.dirty_blocks() {
@@ -170,7 +167,7 @@ impl BlockManager {
             let parser = self
                 .parser_registry
                 .get(block.syntax)
-                .ok_or_else(|| format!("No parser for {:?}", block.syntax))?;
+                .ok_or_else(|| DocumentError::missing_parser(format!("{:?}", block.syntax)))?;
 
             let rendered = parser.render(&block.ast, &block.metadata);
             output.push_str(&rendered);
@@ -181,13 +178,13 @@ impl BlockManager {
     }
 
     /// Get total number of blocks
-    #[must_use] 
+    #[must_use]
     pub const fn block_count(&self) -> usize {
         self.blocks.len()
     }
 
     /// Find blocks by heading level
-    #[must_use] 
+    #[must_use]
     pub fn find_blocks_by_heading_level(&self, level: u8) -> Vec<usize> {
         self.blocks
             .iter()
@@ -198,7 +195,7 @@ impl BlockManager {
     }
 
     /// Find all heading blocks
-    #[must_use] 
+    #[must_use]
     pub fn find_headings(&self) -> Vec<usize> {
         self.blocks
             .iter()

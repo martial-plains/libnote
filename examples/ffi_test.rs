@@ -3,103 +3,44 @@
 //! This demonstrates the cross-platform interface that would be used
 //! from Swift, Kotlin, Python, etc.
 
-use note::ffi::LibnoteDocument;
+use note::models::{Block, Note};
 
 fn main() {
     println!("=== LibnoteDocument FFI Example ===\n");
 
-    // Create a new document
-    let mut doc = LibnoteDocument::new();
+    // Create a new note
+    let mut note = Note {
+        id: "doc-1".to_string(),
+        title: "Document".to_string(),
+        blocks: Vec::new(),
+    };
     println!("✓ Created new LibnoteDocument");
 
-    // Parse a mixed-syntax document
-    let mixed_doc = r#"# Project Plan
+    // Add some blocks to the note
+    use note::models::{Inline, LeafBlock};
 
-This is a mixed-syntax document demonstrating the FFI interface.
+    note.blocks.push(Block::Leaf {
+        leaf: LeafBlock::Heading {
+            level: 1,
+            content: vec![Inline::Text {
+                text: "Project Plan".to_string(),
+            }],
+        },
+    });
 
-## TODO Items
+    note.blocks.push(Block::Leaf {
+        leaf: LeafBlock::Paragraph {
+            content: vec![Inline::Text {
+                text: "This is a note with structured content.".to_string(),
+            }],
+        },
+    });
 
-* TODO: Implement feature X
-* TODO: Write tests
-* DONE: Design architecture
+    // Display blocks
+    println!("\n✓ Note contains {} blocks\n", note.blocks.len());
 
-Some Markdown content here.
-
-$$E = mc^2$$
-
-More content.
-"#;
-
-    match doc.parse(mixed_doc) {
-        Ok(block_count) => {
-            println!("✓ Parsed document into {} blocks\n", block_count);
-        }
-        Err(e) => {
-            eprintln!("Error parsing: {}", e);
-            return;
-        }
-    }
-
-    // Get all blocks
-    let blocks = doc.get_all_blocks();
-    println!("Total blocks: {}\n", blocks.len());
-
-    for (i, block) in blocks.iter().enumerate() {
-        println!(
-            "Block {}: {} (lines {}-{})",
-            i, block.syntax_type, block.start_line, block.end_line
-        );
-        if let Some(level) = block.heading_level {
-            println!("  └─ Heading Level: {}", level);
-        }
-        if let Some(todo) = &block.todo_state {
-            println!("  └─ TODO State: {}", todo);
-        }
-    }
-
-    println!("\n✓ Heading blocks:");
-    let headings = doc.find_headings();
-    for idx in headings {
-        if let Some(block) = doc.get_block(idx) {
-            println!(
-                "  Block {}: {} (Level {})",
-                idx,
-                block.syntax_type,
-                block.heading_level.unwrap_or(0)
-            );
-        }
-    }
-
-    println!("\n✓ TODO items:");
-    let todos = doc.find_todos();
-    for idx in todos {
-        if let Some(block) = doc.get_block(idx) {
-            println!(
-                "  Block {}: {} ({})",
-                idx,
-                block.syntax_type,
-                block.todo_state.as_ref().unwrap_or(&"NO TODO".to_string())
-            );
-        }
-    }
-
-    println!("\n✓ DONE items:");
-    let done = doc.find_done_items();
-    for idx in done {
-        if let Some(block) = doc.get_block(idx) {
-            println!("  Block {}: {}", idx, block.syntax_type);
-        }
-    }
-
-    // Render back to text
-    match doc.render() {
-        Ok(rendered) => {
-            println!("\n✓ Rendered document ({} chars)", rendered.len());
-            println!("Match: {}", rendered == mixed_doc);
-        }
-        Err(e) => {
-            eprintln!("Error rendering: {}", e);
-        }
+    for (i, block) in note.blocks.iter().enumerate() {
+        println!("Block {}: {:?}", i, block);
     }
 
     println!("\n=== FFI Example Complete ===");

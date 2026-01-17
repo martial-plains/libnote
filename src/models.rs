@@ -7,6 +7,20 @@ use serde::{Deserialize, Serialize};
 pub type Blocks = Vec<Block>;
 pub type Inlines = Vec<Inline>;
 
+/// A key-value attribute pair for UniFFI compatibility
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Record)]
+pub struct Attribute {
+    pub key: String,
+    pub value: String,
+}
+
+/// A definition list item containing term and definition
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Record)]
+pub struct DefinitionItem {
+    pub term: Inlines,
+    pub definition: Blocks,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Note {
     pub id: String,
@@ -101,7 +115,7 @@ impl HybridNote {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum ContainerBlock {
     Quote {
         blocks: Blocks,
@@ -118,12 +132,12 @@ pub enum ContainerBlock {
     },
     Div {
         classes: Vec<String>,
-        attributes: Vec<(String, String)>,
+        attributes: Vec<Attribute>,
         children: Vec<Block>,
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum LeafBlock {
     Paragraph {
         content: Inlines,
@@ -149,11 +163,11 @@ pub enum LeafBlock {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum Block {
     Container { container: ContainerBlock },
     Leaf { leaf: LeafBlock },
-    DefinitionList { items: Vec<(Inlines, Blocks)> },
+    DefinitionList { items: Vec<DefinitionItem> },
     FootnoteDefinition { label: String, content: Blocks },
 }
 
@@ -244,7 +258,7 @@ impl Block {
     #[must_use]
     pub const fn div(
         classes: Vec<String>,
-        attributes: Vec<(String, String)>,
+        attributes: Vec<Attribute>,
         children: Vec<Self>,
     ) -> Self {
         Self::Container {
@@ -257,7 +271,7 @@ impl Block {
     }
 
     #[must_use]
-    pub const fn definition_list(items: Vec<(Inlines, Blocks)>) -> Self {
+    pub const fn definition_list(items: Vec<DefinitionItem>) -> Self {
         Self::DefinitionList { items }
     }
 
@@ -371,9 +385,9 @@ impl_container_helpers!(
     }
 );
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum ListStyle {
-    Unordered { bullet: char },
+    Unordered { bullet: u8 },
     Ordered { numbering: Numbering },
 }
 
@@ -387,7 +401,7 @@ impl ListStyle {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum NumberingType {
     Decimal,
     LowerAlpha,
@@ -396,36 +410,36 @@ pub enum NumberingType {
     UpperRoman,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum NumberingStyle {
     Dot,
     Paren,
     ZeroPadded,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Record)]
 pub struct Numbering {
     pub kind: NumberingType,
     pub style: NumberingStyle,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, uniffi::Enum)]
 pub enum Inline {
     Text {
         text: String,
     },
     Bold {
-        content: Vec<Self>,
+        content: Vec<Inline>,
     },
     Italic {
-        content: Vec<Self>,
+        content: Vec<Inline>,
     },
     Strikethrough {
-        content: Vec<Self>,
+        content: Vec<Inline>,
     },
 
     Link {
-        text: Vec<Self>,
+        text: Vec<Inline>,
         target: String,
     },
 
@@ -444,10 +458,10 @@ pub enum Inline {
     LineBreak,
 
     Superscript {
-        content: Vec<Self>,
+        content: Vec<Inline>,
     },
     Subscript {
-        content: Vec<Self>,
+        content: Vec<Inline>,
     },
 
     FootnoteReference {
@@ -455,7 +469,7 @@ pub enum Inline {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Enum)]
 pub enum AttachmentType {
     Image,
     Audio,
@@ -477,14 +491,14 @@ impl fmt::Display for AttachmentType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Record)]
 pub struct Attachment {
     pub name: String,
     pub src: String,
     pub kind: AttachmentType,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 pub enum Alignment {
     #[default]
     Left,
@@ -492,21 +506,21 @@ pub enum Alignment {
     Right,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum DecimalStyle {
     Dot,
     Paren,
     ZeroPadded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum LinkTarget {
     Note(String),
     Attachment(String),
 }
 
 /// Document format preference
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 pub enum DocumentFormat {
     /// Pure AST representation (standard Note)
     Abstract,

@@ -5,36 +5,8 @@ use std::collections::HashMap;
 
 use super::{BlockMetadata, SyntaxKind};
 
-/// Result type for parsing operations
-pub type ParseResult<T> = Result<T, ParseError>;
-
-/// Error types for parsing
-#[derive(Debug, Clone)]
-pub enum ParseError {
-    /// Syntax error at line with message
-    SyntaxError { line: usize, message: String },
-    /// Unsupported syntax type
-    UnsupportedSyntax(String),
-    /// Block detection failed
-    DetectionFailed(String),
-    /// Other parsing error
-    Other(String),
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SyntaxError { line, message } => {
-                write!(f, "Syntax error at line {line}: {message}")
-            }
-            Self::UnsupportedSyntax(s) => write!(f, "Unsupported syntax: {s}"),
-            Self::DetectionFailed(s) => write!(f, "Block detection failed: {s}"),
-            Self::Other(s) => write!(f, "Parse error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
+// Re-export error types for convenience
+pub use crate::error::{ParseError, ParseResult};
 
 /// Trait for implementing parsers for different syntaxes
 pub trait Parser: Send + Sync {
@@ -62,7 +34,7 @@ pub struct ParserRegistry {
 
 impl ParserRegistry {
     /// Create a new empty registry
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             parsers: HashMap::new(),
@@ -75,13 +47,13 @@ impl ParserRegistry {
     }
 
     /// Get a parser for the given syntax kind
-    #[must_use] 
+    #[must_use]
     pub fn get(&self, syntax: SyntaxKind) -> Option<&dyn Parser> {
         self.parsers.get(&syntax).map(std::convert::AsRef::as_ref)
     }
 
     /// List all registered syntax kinds
-    #[must_use] 
+    #[must_use]
     pub fn available_syntaxes(&self) -> Vec<SyntaxKind> {
         self.parsers.keys().copied().collect()
     }

@@ -7,8 +7,8 @@ use regex::Regex;
 use crate::{
     formats::{NoteMetadata, NoteSerialization},
     models::{
-        Alignment, Attachment, AttachmentType, Block, Blocks, ContainerBlock, Inline, LeafBlock,
-        LinkTarget, ListStyle, Note, Numbering, NumberingStyle, NumberingType,
+        Alignment, Attachment, AttachmentType, Block, Blocks, ContainerBlock, DefinitionItem,
+        Inline, LeafBlock, LinkTarget, ListStyle, Note, Numbering, NumberingStyle, NumberingType,
     },
 };
 
@@ -74,12 +74,12 @@ impl MarkdownFormat {
         }
     }
 
-    fn serialize_definition_list(items: &[(Vec<Inline>, Vec<Block>)]) -> String {
+    fn serialize_definition_list(items: &[DefinitionItem]) -> String {
         let mut out = String::new();
-        for (term, defs) in items {
-            out.push_str(&serialize_inlines(term));
+        for item in items {
+            out.push_str(&serialize_inlines(&item.term));
             out.push_str(":\n");
-            for def_block in defs {
+            for def_block in &item.definition {
                 for line in serialize_blocks(std::slice::from_ref(def_block)).lines() {
                     out.push_str("  ");
                     out.push_str(line);
@@ -427,10 +427,10 @@ fn serialize_blocks(blocks: &[Block]) -> String {
             },
 
             Block::DefinitionList { items } => {
-                for (term, defs) in items {
-                    out.push_str(&serialize_inlines(term));
+                for item in items {
+                    out.push_str(&serialize_inlines(&item.term));
                     out.push_str(":\n");
-                    for def_block in defs {
+                    for def_block in &item.definition {
                         let def_serialized = serialize_blocks(std::slice::from_ref(def_block));
                         for line in def_serialized.lines() {
                             out.push_str("  ");
@@ -723,7 +723,7 @@ pub fn parse_list(input: &str) -> Option<Block> {
         None
     } else {
         Some(Block::list(
-            list_style.unwrap_or(ListStyle::Unordered { bullet: '-' }),
+            list_style.unwrap_or(ListStyle::Unordered { bullet: b'-' }),
             items,
         ))
     }
@@ -739,11 +739,11 @@ fn parse_list_item(lines: &[&str], start_index: usize) -> Option<(Blocks, usize,
     let indent = line.len() - trimmed.len();
 
     let (list_style, content) = if let Some(stripped) = trimmed.strip_prefix("- ") {
-        (ListStyle::Unordered { bullet: '-' }, stripped)
+        (ListStyle::Unordered { bullet: b'-' }, stripped)
     } else if let Some(stripped) = trimmed.strip_prefix("* ") {
-        (ListStyle::Unordered { bullet: '*' }, stripped)
+        (ListStyle::Unordered { bullet: b'*' }, stripped)
     } else if let Some(stripped) = trimmed.strip_prefix("+ ") {
-        (ListStyle::Unordered { bullet: '+' }, stripped)
+        (ListStyle::Unordered { bullet: b'+' }, stripped)
     } else if let Some(dot_pos) = trimmed.find('.') {
         if trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
             && trimmed[dot_pos + 1..].starts_with(' ')
@@ -1177,7 +1177,7 @@ mod tests {
                 ]),
                 Block::image(Some("Alt text".to_string()), "image.png".to_string()),
                 Block::list(
-                    ListStyle::Unordered { bullet: '-' },
+                    ListStyle::Unordered { bullet: b'-' },
                     vec![
                         vec![Block::paragraph(vec![Inline::Text {
                             text: "Item 1".to_string(),

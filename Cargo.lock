@@ -284,6 +284,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_cbor",
+ "thiserror",
  "uniffi",
  "uuid",
 ]

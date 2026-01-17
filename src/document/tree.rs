@@ -1,37 +1,48 @@
 #![allow(clippy::missing_panics_doc)]
 
+use std::sync::Arc;
+
 use super::span::TextSpan;
 use crate::models::{Block, Inlines, LeafBlock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(u64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, uniffi::Record)]
+pub struct NodeId {
+    value: u64,
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct BlockNode {
     pub id: NodeId,
     pub block: Block,
     pub span: TextSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Section {
     pub id: NodeId,
     pub level: u8, // 0 = root
     pub title: Option<Inlines>,
     pub blocks: Vec<BlockNode>,
-    pub children: Vec<Self>,
+    pub children: Vec<Section>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Document {
     pub id: String,
     pub root: Section,
 }
 
-#[must_use] 
+impl Document {
+    #[uniffi::constructor]
+    pub fn new(id: String, root: Section) -> Arc<Document> {
+        Arc::new(Self { id, root })
+    }
+}
+
+#[must_use]
 pub fn build_section_tree(blocks: Vec<BlockNode>) -> Section {
     let root = Section {
-        id: NodeId(0),
+        id: NodeId::default(),
         level: 0,
         title: None,
         blocks: Vec::new(),
@@ -79,7 +90,7 @@ mod tests {
 
     fn node(id: u64, block: Block) -> BlockNode {
         BlockNode {
-            id: NodeId(id),
+            id: NodeId { value: id },
             block,
             span: TextSpan { start: 0, end: 0 },
         }
@@ -202,10 +213,10 @@ mod tests {
         let doc = build_section_tree(blocks);
 
         let section = &doc.children[0];
-        assert_eq!(section.id, NodeId(10));
+        assert_eq!(section.id, NodeId { value: 10 });
 
         let block = &section.blocks[0];
-        assert_eq!(block.id, NodeId(11));
+        assert_eq!(block.id, NodeId { value: 10 });
     }
 
     #[test]
